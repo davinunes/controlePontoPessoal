@@ -127,6 +127,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const domCropViewport = document.getElementById('crop-viewport');
     const domCropImage = document.getElementById('crop-image');
     const domCropZoomSlider = document.getElementById('crop-zoom-slider');
+    const domCropWidthSlider = document.getElementById('crop-width-slider');
+    const domCropHeightSlider = document.getElementById('crop-height-slider');
+    const domCropWidthVal = document.getElementById('crop-width-val');
+    const domCropHeightVal = document.getElementById('crop-height-val');
+    const domBtnCropPresets = document.querySelectorAll('.btn-crop-preset');
     const domBtnCancelCrop = document.getElementById('btn-cancel-crop');
     const domBtnConfirmCrop = document.getElementById('btn-confirm-crop');
     const domBtnCropPhotoNew = document.getElementById('btn-crop-photo-new');
@@ -1405,6 +1410,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         startY: 0
     };
 
+    function updateCropViewportSize(width, height) {
+        domCropViewport.style.width = `${width}px`;
+        domCropViewport.style.height = `${height}px`;
+        domCropWidthSlider.value = width;
+        domCropHeightSlider.value = height;
+        domCropWidthVal.textContent = `${width}px`;
+        domCropHeightVal.textContent = `${height}px`;
+        
+        // Destaca a predefinição ativa
+        domBtnCropPresets.forEach(btn => {
+            const btnW = parseInt(btn.getAttribute('data-width'));
+            const btnH = parseInt(btn.getAttribute('data-height'));
+            if (btnW === width && btnH === height) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
     function openCropModal(originalPhotoBase64, onConfirmCallback) {
         cropState.originalSrc = originalPhotoBase64;
         cropState.targetCallback = onConfirmCallback;
@@ -1415,6 +1440,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         domCropImage.src = originalPhotoBase64;
         domCropZoomSlider.value = 1;
         domCropImage.style.transform = `translate(0px, 0px) scale(1)`;
+        
+        // Reinicializa o viewport para o tamanho padrão (260x340)
+        updateCropViewportSize(260, 340);
         
         domCropModal.classList.remove('hidden');
     }
@@ -1465,6 +1493,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         domCropImage.style.transform = `translate(${cropState.x}px, ${cropState.y}px) scale(${cropState.scale})`;
     });
 
+    // Controles de Largura e Altura Dinâmicos
+    domCropWidthSlider.addEventListener('input', (e) => {
+        const w = parseInt(e.target.value);
+        const h = parseInt(domCropHeightSlider.value);
+        updateCropViewportSize(w, h);
+    });
+
+    domCropHeightSlider.addEventListener('input', (e) => {
+        const w = parseInt(domCropWidthSlider.value);
+        const h = parseInt(e.target.value);
+        updateCropViewportSize(w, h);
+    });
+
+    // Presets Rápidos
+    domBtnCropPresets.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const w = parseInt(btn.getAttribute('data-width'));
+            const h = parseInt(btn.getAttribute('data-height'));
+            updateCropViewportSize(w, h);
+        });
+    });
+
     // Cancelar Recorte
     domBtnCancelCrop.addEventListener('click', closeCropModal);
     domBtnCloseCropModal.addEventListener('click', closeCropModal);
@@ -1490,9 +1540,24 @@ document.addEventListener('DOMContentLoaded', async () => {
             const cropW = rectV.width * ratio;
             const cropH = rectV.height * ratio;
 
+            // Calcula proporção e limita a dimensão máxima em 800px para otimização
+            let targetW = cropW;
+            let targetH = cropH;
+            const MAX_DIM = 800;
+            
+            if (targetW > MAX_DIM || targetH > MAX_DIM) {
+                if (targetW > targetH) {
+                    targetH = (targetH / targetW) * MAX_DIM;
+                    targetW = MAX_DIM;
+                } else {
+                    targetW = (targetW / targetH) * MAX_DIM;
+                    targetH = MAX_DIM;
+                }
+            }
+
             const canvas = document.createElement('canvas');
-            canvas.width = 650;
-            canvas.height = 850;
+            canvas.width = Math.round(targetW);
+            canvas.height = Math.round(targetH);
             
             const ctx = canvas.getContext('2d');
             
