@@ -186,7 +186,7 @@ app.post('/api/sync', (req, res) => {
             } else {
                 // Em caso de conflito, atualiza os campos, mas mantém integridade
                 srvPunch.timestamp = cliPunch.timestamp;
-                srvPunch.photo = cliPunch.photo || srvPunch.photo;
+                srvPunch.photo = cliPunch.photo !== undefined ? cliPunch.photo : srvPunch.photo;
                 srvPunch.deleted = false;
                 srvPunch.updatedAt = new Date().toISOString();
             }

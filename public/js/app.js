@@ -1583,6 +1583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         domEditModalDateLabel.textContent = dateFormatted;
         
         renderEditingPunches();
+        domEditPunchesContainer.scrollTop = 0;
         domEditDayModal.classList.remove('hidden');
     }
 

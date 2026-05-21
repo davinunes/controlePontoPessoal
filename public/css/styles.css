@@ -1180,7 +1180,7 @@ h1, h2, h3, h4, .current-month-display {
 /* ======================================================== */
 .app-nav {
     height: 72px;
-    position: absolute;
+    position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
@@ -1194,8 +1194,25 @@ h1, h2, h3, h4, .current-month-display {
 /* Ajustes no desktop para moldura do celular */
 @media (min-width: 480px) {
     .app-nav {
+        position: absolute;
         border-bottom-left-radius: 32px;
         border-bottom-right-radius: 32px;
+    }
+    
+    .btn-fab {
+        position: absolute;
+    }
+
+    .modal-overlay {
+        position: absolute;
+    }
+
+    .lightbox-overlay {
+        position: absolute;
+    }
+
+    .toast {
+        position: absolute;
     }
 }
 
@@ -1235,7 +1252,7 @@ h1, h2, h3, h4, .current-month-display {
 /* BOTÃO FLUTUANTE DE BATER PONTO (FAB)                     */
 /* ======================================================== */
 .btn-fab {
-    position: absolute;
+    position: fixed;
     bottom: 92px; /* Pouco acima do bottom nav */
     right: 20px;
     width: 60px;
@@ -1266,7 +1283,7 @@ h1, h2, h3, h4, .current-month-display {
 /* MODALS (DESIGN ESTILO FOLHA DE DESLIZAMENTO IOS/ANDROID) */
 /* ======================================================== */
 .modal-overlay {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
@@ -1447,7 +1464,7 @@ h1, h2, h3, h4, .current-month-display {
 /* LIGHTBOX DE COMPROVANTES (MODAL AMPLIADO)                */
 /* ======================================================== */
 .lightbox-overlay {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
@@ -1511,7 +1528,7 @@ h1, h2, h3, h4, .current-month-display {
 /* TOAST NOTIFICATION                                       */
 /* ======================================================== */
 .toast {
-    position: absolute;
+    position: fixed;
     bottom: 84px;
     left: 50%;
     transform: translateX(-50%);
