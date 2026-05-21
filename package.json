@@ -1,0 +1,23 @@
+{
+  "name": "controle-ponto-pessoal",
+  "version": "1.0.0",
+  "description": "Aplicativo mobile-first para controle de ponto pessoal offline e sincronizado",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "ponto",
+    "clt",
+    "offline-first",
+    "indexeddb",
+    "sync"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

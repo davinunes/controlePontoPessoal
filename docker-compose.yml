@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  ponto-pessoal:
+    image: node:20-alpine
+    container_name: ponto-pessoal
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /root/pontoPessoal:/app
+    working_dir: /app
+    # Executa npm install para garantir que as dependências sejam baixadas dentro do container
+    # (já que os arquivos serão copiados sem a pasta node_modules) e depois inicia o servidor
+    command: sh -c "npm install && npm start"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production

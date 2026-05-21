@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Controle de Ponto Pessoal</title>
+    
+    <!-- Metas para PWA / Mobile -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
+    
+    <!-- Google Fonts (Outfit & Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Estilos Customizados -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- ======================================================== -->
+    <!-- TELA DE LOGIN / REGISTRO (AUTÔNOMA)                      -->
+    <!-- ======================================================== -->
+    <section id="auth-screen" class="auth-container">
+        <div class="auth-card glass">
+            <div class="auth-header">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                </div>
+                <h1>PontoPessoal</h1>
+                <p id="auth-subtitle">Entre na sua folha de ponto pessoal</p>
+            </div>
+            
+            <!-- Formulário de Login -->
+            <form id="login-form" class="auth-form">
+                <div class="form-group">
+                    <label for="login-username">Usuário</label>
+                    <input type="text" id="login-username" placeholder="Digite seu usuário" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Senha</label>
+                    <input type="password" id="login-password" placeholder="Digite sua senha" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary" id="btn-login-submit">Entrar</button>
+                <div class="auth-toggle">
+                    Não tem conta? <a href="#" id="go-to-register">Criar nova conta</a>
+                </div>
+            </form>
+
+            <!-- Formulário de Cadastro -->
+            <form id="register-form" class="auth-form hidden">
+                <div class="form-group">
+                    <label for="reg-username">Usuário (Login)</label>
+                    <input type="text" id="reg-username" placeholder="Ex: joaosilva" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Senha</label>
+                    <input type="password" id="reg-password" placeholder="Defina uma senha" required autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="reg-name">Nome Completo</label>
+                    <input type="text" id="reg-name" placeholder="Ex: João da Silva" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-company">Empresa</label>
+                    <input type="text" id="reg-company" placeholder="Ex: Google Inc." required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-journey">Jornada Diária</label>
+                    <select id="reg-journey" required>
+                        <option value="480" selected>8 horas (padrão)</option>
+                        <option value="360">6 horas</option>
+                        <option value="240">4 horas</option>
+                        <option value="528">8h 48m (compensação sabático)</option>
+                        <option value="custom">Outra jornada...</option>
+                    </select>
+                </div>
+                <div class="form-group hidden" id="reg-journey-custom-group">
+                    <label for="reg-journey-custom">Jornada Customizada (HH:MM)</label>
+                    <input type="time" id="reg-journey-custom" value="08:00">
+                </div>
+                <button type="submit" class="btn btn-success" id="btn-register-submit">Cadastrar e Entrar</button>
+                <div class="auth-toggle">
+                    Já tem conta? <a href="#" id="go-to-login">Ir para login</a>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- CONTAINER DA APLICAÇÃO PRINCIPAL                         -->
+    <!-- ======================================================== -->
+    <main id="app-screen" class="app-container hidden">
+        <!-- Cabeçalho Principal -->
+        <header class="app-header glass">
+            <div class="header-user-info">
+                <span class="user-greeting">Olá, <strong id="header-user-name">Usuário</strong></span>
+                <span class="user-company" id="header-user-company">Empresa</span>
+            </div>
+            
+            <!-- Badge de Conectividade / Sincronização -->
+            <div id="sync-badge" class="sync-badge offline" title="Clique para forçar sincronização">
+                <span class="badge-dot"></span>
+                <span class="badge-text" id="sync-status-text">Verificando...</span>
+                <svg class="sync-spinner hidden" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+            </div>
+        </header>
+
+        <!-- Área de Conteúdo Dinâmico (Telas SPA) -->
+        <section class="app-content">
+            
+            <!-- 1. TELA: HOME (INÍCIO) -->
+            <div id="view-home" class="view-panel active">
+                <div class="welcome-card">
+                    <p class="today-date" id="home-today-date">Carregando data...</p>
+                    <h2 class="welcome-title">Visão do Dia</h2>
+                </div>
+
+                <!-- Resumo do Banco de Horas do Mês -->
+                <div class="balance-card glass">
+                    <div class="card-metric">
+                        <span class="metric-label">Banco de Horas (Mês Atual)</span>
+                        <div class="metric-value-container">
+                            <span class="metric-value" id="home-month-balance">00h 00m</span>
+                            <span class="metric-trend-indicator" id="home-month-trend">Estável</span>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="home-month-progress" style="width: 50%;"></div>
+                    </div>
+                    <div class="card-helper-text">
+                        Cálculo baseado na jornada diária de <span id="home-user-journey">8h 00m</span>.
+                    </div>
+                </div>
+
+                <!-- Lista de Registros do Dia Corrente -->
+                <div class="daily-records-section">
+                    <div class="section-header">
+                        <h3>Registros de Hoje</h3>
+                        <span class="records-count" id="home-records-count">0 batidas</span>
+                    </div>
+
+                    <div class="daily-punches-list" id="home-punches-list">
+                        <!-- Gerado Dinamicamente -->
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <svg viewBox="0 0 24 24" width="36" height="36" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                            </div>
+                            <p>Nenhum ponto registrado hoje.</p>
+                            <span>Clique no botão azul abaixo para registrar seu ponto.</span>
+                        </div>
+                    </div>
+
+                    <!-- Resumo de Horas Trabalhadas Hoje -->
+                    <div class="day-summary-footer glass hidden" id="home-day-summary">
+                        <div class="summary-item">
+                            <span class="summary-label">Trabalhado hoje:</span>
+                            <strong class="summary-value" id="home-day-worked">00h 00m</strong>
+                        </div>
+                        <div class="summary-divider"></div>
+                        <div class="summary-item">
+                            <span class="summary-label">Saldo do dia:</span>
+                            <strong class="summary-value positive" id="home-day-balance">00h 00m</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. TELA: FOLHA DE PONTO (MENSAL) -->
+            <div id="view-timesheet" class="view-panel hidden">
+                <div class="view-header">
+                    <h2>Folha de Ponto</h2>
+                    
+                    <!-- Seletor de Mês e Ano -->
+                    <div class="month-selector">
+                        <button class="btn-icon" id="timesheet-prev-month">
+                            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        </button>
+                        <span class="current-month-display" id="timesheet-month-label">Maio de 2026</span>
+                        <button class="btn-icon" id="timesheet-next-month">
+                            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Resumo Geral do Mês Selecionado -->
+                <div class="timesheet-summary-cards">
+                    <div class="summary-card glass">
+                        <span class="summary-card-label">Dias Trabalhados</span>
+                        <span class="summary-card-value" id="timesheet-days-worked">0</span>
+                    </div>
+                    <div class="summary-card glass">
+                        <span class="summary-card-label">Total Horas</span>
+                        <span class="summary-card-value" id="timesheet-total-hours">00h 00m</span>
+                    </div>
+                    <div class="summary-card glass">
+                        <span class="summary-card-label">Saldo Acumulado</span>
+                        <span class="summary-card-value" id="timesheet-total-balance">00h 00m</span>
+                    </div>
+                </div>
+
+                <!-- Lista de Dias do Mês -->
+                <div class="timesheet-days-list" id="timesheet-days-container">
+                    <!-- Gerado Dinamicamente -->
+                </div>
+            </div>
+
+            <!-- 3. TELA: ÁLBUM DE FIGURINHAS (COMPROVANTES) -->
+            <div id="view-album" class="view-panel hidden">
+                <div class="view-header">
+                    <h2>Álbum de Figurinhas</h2>
+                    <p class="subtitle">Comprovantes do mês corrente</p>
+                </div>
+
+                <div class="album-month-selector">
+                    <button class="btn-icon" id="album-prev-month">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </button>
+                    <span class="current-month-display" id="album-month-label">Maio de 2026</span>
+                    <button class="btn-icon" id="album-next-month">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                    </button>
+                </div>
+
+                <!-- Grid de Figurihas do Mês -->
+                <div class="album-container" id="album-days-container">
+                    <!-- Gerado Dinamicamente: Cada dia que tiver foto cria uma linha com fotos lado a lado -->
+                    <div class="empty-state">
+                        <div class="empty-state-icon">
+                            <svg viewBox="0 0 24 24" width="36" height="36" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        </div>
+                        <p>Nenhum comprovante em foto enviado este mês.</p>
+                        <span>Ao registrar um ponto na tela inicial, faça o upload ou tire uma foto do comprovante em papel.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. TELA: CONFIGURAÇÕES -->
+            <div id="view-settings" class="view-panel hidden">
+                <div class="view-header">
+                    <h2>Configurações</h2>
+                </div>
+
+                <!-- Perfil do Usuário -->
+                <div class="settings-card glass">
+                    <h3>Perfil e Jornada</h3>
+                    <form id="settings-profile-form">
+                        <div class="form-group">
+                            <label for="settings-name">Nome Completo</label>
+                            <input type="text" id="settings-name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="settings-company">Empresa</label>
+                            <input type="text" id="settings-company" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="settings-journey">Jornada Diária de Trabalho</label>
+                            <select id="settings-journey" required>
+                                <option value="480">8 horas</option>
+                                <option value="360">6 horas</option>
+                                <option value="240">4 horas</option>
+                                <option value="528">8h 48m (compensação sabático)</option>
+                                <option value="custom">Outra jornada...</option>
+                            </select>
+                        </div>
+                        <div class="form-group hidden" id="settings-journey-custom-group">
+                            <label for="settings-journey-custom">Jornada Customizada (HH:MM)</label>
+                            <input type="time" id="settings-journey-custom">
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="btn-save-settings">Salvar Configurações</button>
+                    </form>
+                </div>
+
+                <!-- Configurações de Conexão/Sincronização -->
+                <div class="settings-card glass">
+                    <h3>Sincronização com o Servidor</h3>
+                    <div class="form-group">
+                        <label for="settings-server-url">URL do Servidor</label>
+                        <input type="url" id="settings-server-url" placeholder="http://localhost:3000">
+                        <span class="input-helper">URL da API onde as informações são sincronizadas (será salva localmente).</span>
+                    </div>
+                    <div class="sync-actions">
+                        <button class="btn btn-outline" id="btn-manual-sync">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                            Sincronizar Agora
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Gerenciamento de Perfis de Usuário (Múltiplas Pessoas) -->
+                <div class="settings-card glass">
+                    <h3>Alternar Perfil (Múltiplas Pessoas)</h3>
+                    <p class="subtitle">Este dispositivo gerencia mais de uma pessoa. Clique para trocar:</p>
+                    
+                    <div class="profiles-list" id="settings-profiles-list">
+                        <!-- Gerado Dinamicamente -->
+                    </div>
+
+                    <button class="btn btn-outline-success btn-full" id="btn-add-profile">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        Adicionar Novo Perfil (Pessoa)
+                    </button>
+                </div>
+
+                <!-- Botão Logout -->
+                <div class="settings-actions">
+                    <button class="btn btn-danger btn-full" id="btn-logout">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                        Sair desta Conta
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Botão Flutuante de Bater Ponto (FAB) -->
+        <button class="btn-fab" id="btn-punch-fab" title="Registrar Ponto">
+            <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        </button>
+
+        <!-- Barra de Navegação Inferior -->
+        <nav class="app-nav glass">
+            <button class="nav-item active" data-view="home">
+                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                <span>Início</span>
+            </button>
+            <button class="nav-item" data-view="timesheet">
+                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                <span>Folha</span>
+            </button>
+            <button class="nav-item" data-view="album">
+                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                <span>Álbum</span>
+            </button>
+            <button class="nav-item" data-view="settings">
+                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Ajustes</span>
+            </button>
+        </nav>
+    </main>
+
+    <!-- ======================================================== -->
+    <!-- MODAL: REGISTRAR NOVO PONTO                              -->
+    <!-- ======================================================== -->
+    <div id="punch-modal" class="modal-overlay hidden">
+        <div class="modal-card glass">
+            <div class="modal-header">
+                <h3>Registrar Novo Ponto</h3>
+                <button class="btn-icon-close" id="btn-close-punch-modal">
+                    <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            
+            <form id="punch-form">
+                <!-- Seletor de Data e Hora -->
+                <div class="form-group">
+                    <label for="punch-datetime">Data e Hora do Registro</label>
+                    <input type="datetime-local" id="punch-datetime" required>
+                    <div class="quick-time-buttons">
+                        <button type="button" class="btn-small" id="btn-set-now">Agora</button>
+                        <button type="button" class="btn-small" id="btn-set-today-morning">08:00</button>
+                        <button type="button" class="btn-small" id="btn-set-today-lunch-out">12:00</button>
+                        <button type="button" class="btn-small" id="btn-set-today-lunch-in">13:00</button>
+                        <button type="button" class="btn-small" id="btn-set-today-evening">17:00</button>
+                    </div>
+                </div>
+
+                <!-- Upload de Comprovante (Câmera ou Galeria) -->
+                <div class="form-group">
+                    <label>Comprovante (Foto do Papel)</label>
+                    
+                    <!-- Campo de Input Oculto mas configurado para câmera -->
+                    <input type="file" id="punch-photo-input" accept="image/*" class="hidden">
+                    <!-- Campo Oculto para Câmera Direta no Celular -->
+                    <input type="file" id="punch-camera-input" accept="image/*" capture="environment" class="hidden">
+                    
+                    <div class="image-upload-area" id="image-upload-trigger">
+                        <div class="upload-placeholder">
+                            <svg viewBox="0 0 24 24" width="40" height="40" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                            <span>Tirar Foto ou Enviar Comprovante</span>
+                            <small>Suporta câmera direta do celular ou arquivo da galeria</small>
+                        </div>
+                        
+                        <div class="upload-preview hidden" id="upload-preview-container">
+                            <img src="" alt="Previsualização do comprovante" id="upload-preview-img">
+                            <div class="preview-overlay">
+                                <span class="preview-info" id="upload-preview-info">tamanho.jpg</span>
+                                <button type="button" class="btn-remove-photo" id="btn-remove-photo" title="Remover Foto">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Selecionar especificamente Câmera ou Galeria em Desktop/Mobile -->
+                    <div class="upload-source-buttons">
+                        <button type="button" class="btn-small-outline" id="btn-trigger-camera">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                            Usar Câmera
+                        </button>
+                        <button type="button" class="btn-small-outline" id="btn-trigger-gallery">
+                            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                            Abrir Galeria
+                        </button>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" id="btn-cancel-punch">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btn-save-punch">Gravar Ponto</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- MODAL: VISUALIZADOR DE COMPROVANTE (LIGHTBOX)            -->
+    <!-- ======================================================== -->
+    <div id="lightbox-modal" class="lightbox-overlay hidden">
+        <button class="lightbox-close" id="btn-close-lightbox" title="Fechar">
+            <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+        
+        <div class="lightbox-content">
+            <img src="" alt="Comprovante Ampliado" id="lightbox-img">
+        </div>
+
+        <div class="lightbox-caption">
+            <h4 id="lightbox-date">Dia 20 de Maio de 2026</h4>
+            <p id="lightbox-time">Registro realizado às 08:02</p>
+        </div>
+    </div>
+
+    <!-- Toast Notification (Mensagens Rápidas) -->
+    <div id="toast" class="toast hidden">Notificação</div>
+
+    <!-- ======================================================== -->
+    <!-- SCRIPTS DA APLICAÇÃO                                     -->
+    <!-- ======================================================== -->
+    <script src="js/db.js"></script>
+    <script src="js/camera.js"></script>
+    <script src="js/sync.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
