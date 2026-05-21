@@ -332,33 +332,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         const username = document.getElementById('login-username').value;
         const password = document.getElementById('login-password').value;
 
-        try {
-            // 1. Tenta autenticar localmente no IndexedDB primeiro
-            const user = await window.dbService.loginUser(username, password);
-            loginSuccess(user);
-            showToast(`Bem-vindo, ${user.name}!`);
-        } catch (err) {
-            // 2. Se falhar localmente (ex: usuário não cadastrado nesta origem), tenta no servidor
-            if (err === "Usuário não encontrado." || err === "Senha incorreta.") {
-                showToast("Buscando usuário no servidor...");
-                try {
-                    // Obtém a URL do servidor configurada nas preferências locais ou padrão
-                    const serverUrl = localStorage.getItem(`serverUrl_${username.trim().toLowerCase()}`) || window.syncService.serverUrl;
-                    
-                    const response = await fetch(`${serverUrl}/api/login`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, password })
-                    });
+        // Se estiver online, tenta autenticar e sincronizar com o servidor primeiro
+        if (window.syncService.isOnline) {
+            showToast("Verificando credenciais no servidor...");
+            try {
+                const serverUrl = localStorage.getItem(`serverUrl_${username.trim().toLowerCase()}`) || window.syncService.serverUrl;
+                const response = await fetch(`${serverUrl}/api/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
 
-                    if (!response.ok) {
-                        const errData = await response.json();
-                        throw new Error(errData.message || "Erro na autenticação com o servidor.");
-                    }
-
+                if (response.ok) {
                     const data = await response.json();
                     if (data.success && data.user) {
-                        // Cria/Salva o perfil de usuário retornado no IndexedDB local
                         const serverUser = {
                             username: data.user.username,
                             password: password, // guarda a senha para logins locais futuros
@@ -370,28 +357,31 @@ document.addEventListener('DOMContentLoaded', async () => {
                         
                         await window.dbService.saveUser(serverUser);
                         
-                        // Mescla e restaura todos os pontos obtidos do servidor
                         if (Array.isArray(data.punches)) {
                             await window.dbService.mergePunchesFromServer(serverUser.username, data.punches);
                         }
 
                         loginSuccess(serverUser);
-                        showToast(`Histórico recuperado do servidor! Bem-vindo, ${serverUser.name}`);
-                    } else {
-                        throw new Error("Resposta inválida do servidor.");
+                        showToast(`Sincronizado com o servidor! Bem-vindo, ${serverUser.name}`);
+                        return; // Login bem sucedido via servidor
                     }
-                } catch (srvErr) {
-                    console.error("Erro na autenticação remota:", srvErr);
-                    // Se falhar por conexão (fetch failed), exibe o erro local original
-                    if (srvErr.message && (srvErr.message.includes("fetch") || srvErr.message.includes("NetworkError"))) {
-                        showToast("Servidor inacessível. Erro local: " + err);
-                    } else {
-                        showToast(srvErr.message || err);
-                    }
+                } else if (response.status === 401 || response.status === 404) {
+                    const errData = await response.json();
+                    showToast(errData.message || "Erro de autenticação com o servidor.");
+                    return; // Erro explícito de credenciais
                 }
-            } else {
-                showToast(err);
+            } catch (srvErr) {
+                console.warn("Falha de rede ao conectar ao servidor. Tentando login local...", srvErr);
             }
+        }
+
+        // Login Local (Offline-First / Fallback)
+        try {
+            const user = await window.dbService.loginUser(username, password);
+            loginSuccess(user);
+            showToast(`Bem-vindo, ${user.name}! (Modo Local)`);
+        } catch (err) {
+            showToast(err);
         }
     });
 

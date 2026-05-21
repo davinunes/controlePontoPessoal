@@ -373,8 +373,13 @@ class AppDB {
                     } else {
                         // Se não existe localmente, adiciona e marca como sincronizado.
                         // Se existe localmente mas não está sincronizado, o servidor é soberano, a menos que o local seja mais recente.
-                        // Como mantemos simples, o servidor retorna o estado consolidado.
-                        if (!localPunch || !localPunch.synced) {
+                        // Se existe e está sincronizado, mas difere (ex: editado no PC), atualiza localmente.
+                        const isDifferent = localPunch && (
+                            localPunch.timestamp !== srvPunch.timestamp ||
+                            localPunch.photo !== srvPunch.photo
+                        );
+
+                        if (!localPunch || !localPunch.synced || isDifferent) {
                             srvPunch.synced = true;
                             operations.push(store.put(srvPunch));
                         }
