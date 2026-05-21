@@ -309,11 +309,65 @@ document.addEventListener('DOMContentLoaded', async () => {
         const password = document.getElementById('login-password').value;
 
         try {
+            // 1. Tenta autenticar localmente no IndexedDB primeiro
             const user = await window.dbService.loginUser(username, password);
             loginSuccess(user);
             showToast(`Bem-vindo, ${user.name}!`);
         } catch (err) {
-            showToast(err);
+            // 2. Se falhar localmente (ex: usuário não cadastrado nesta origem), tenta no servidor
+            if (err === "Usuário não encontrado." || err === "Senha incorreta.") {
+                showToast("Buscando usuário no servidor...");
+                try {
+                    // Obtém a URL do servidor configurada nas preferências locais ou padrão
+                    const serverUrl = localStorage.getItem(`serverUrl_${username.trim().toLowerCase()}`) || window.syncService.serverUrl;
+                    
+                    const response = await fetch(`${serverUrl}/api/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password })
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json();
+                        throw new Error(errData.message || "Erro na autenticação com o servidor.");
+                    }
+
+                    const data = await response.json();
+                    if (data.success && data.user) {
+                        // Cria/Salva o perfil de usuário retornado no IndexedDB local
+                        const serverUser = {
+                            username: data.user.username,
+                            password: password, // guarda a senha para logins locais futuros
+                            name: data.user.name,
+                            company: data.user.company,
+                            journey: data.user.journey,
+                            createdAt: data.user.createdAt || new Date().toISOString()
+                        };
+                        
+                        await window.dbService.saveUser(serverUser);
+                        
+                        // Mescla e restaura todos os pontos obtidos do servidor
+                        if (Array.isArray(data.punches)) {
+                            await window.dbService.mergePunchesFromServer(serverUser.username, data.punches);
+                        }
+
+                        loginSuccess(serverUser);
+                        showToast(`Histórico recuperado do servidor! Bem-vindo, ${serverUser.name}`);
+                    } else {
+                        throw new Error("Resposta inválida do servidor.");
+                    }
+                } catch (srvErr) {
+                    console.error("Erro na autenticação remota:", srvErr);
+                    // Se falhar por conexão (fetch failed), exibe o erro local original
+                    if (srvErr.message && (srvErr.message.includes("fetch") || srvErr.message.includes("NetworkError"))) {
+                        showToast("Servidor inacessível. Erro local: " + err);
+                    } else {
+                        showToast(srvErr.message || err);
+                    }
+                }
+            } else {
+                showToast(err);
+            }
         }
     });
 

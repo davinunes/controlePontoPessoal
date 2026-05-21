@@ -93,6 +93,27 @@ class AppDB {
     }
 
     /**
+     * Salva ou atualiza um usuário diretamente (utilizado para restaurar/sincronizar dados do servidor).
+     */
+    saveUser(user) {
+        return new Promise((resolve, reject) => {
+            if (!user || !user.username) {
+                return reject("Usuário inválido.");
+            }
+            const cleanUsername = user.username.trim().toLowerCase();
+            const transaction = this.db.transaction(['users'], 'readwrite');
+            const store = transaction.objectStore('users');
+            
+            const request = store.put({
+                ...user,
+                username: cleanUsername
+            });
+            request.onsuccess = () => resolve(user);
+            request.onerror = (e) => reject("Erro ao salvar perfil de usuário: " + e.target.error);
+        });
+    }
+
+    /**
      * Autentica um usuário existente.
      */
     loginUser(username, password) {
