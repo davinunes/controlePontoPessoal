@@ -11,7 +11,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         selectedMonth: new Date(),   // Mês de referência para Folha de Ponto
         albumMonth: new Date(),      // Mês de referência para Álbum de Comprovantes
         currentPunchPhoto: null,     // Base64 da foto do comprovante em seleção
-        availableUsers: []           // Lista de perfis salvos neste dispositivo
+        availableUsers: [],          // Lista de perfis salvos neste dispositivo
+        editingDate: null,           // Objeto Date sendo editado atualmente
+        editingPunches: []           // Lista de punches temporários da edição do dia
     };
 
     // Referências de Elementos do DOM - Autenticação
@@ -109,6 +111,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     const domLightboxImg = document.getElementById('lightbox-img');
     const domLightboxDate = document.getElementById('lightbox-date');
     const domLightboxTime = document.getElementById('lightbox-time');
+
+    // Referências - Modal Editar Dia
+    const domEditDayModal = document.getElementById('edit-day-modal');
+    const domBtnCloseEditModal = document.getElementById('btn-close-edit-modal');
+    const domEditModalDateLabel = document.getElementById('edit-modal-date-label');
+    const domEditPunchesContainer = document.getElementById('edit-punches-container');
+    const domBtnAddEditPunch = document.getElementById('btn-add-edit-punch');
+    const domBtnCancelEdit = document.getElementById('btn-cancel-edit');
+    const domBtnSaveEdit = document.getElementById('btn-save-edit');
+
+    // Referências - Modal Recorte
+    const domCropModal = document.getElementById('crop-modal');
+    const domBtnCloseCropModal = document.getElementById('btn-close-crop-modal');
+    const domCropViewport = document.getElementById('crop-viewport');
+    const domCropImage = document.getElementById('crop-image');
+    const domCropZoomSlider = document.getElementById('crop-zoom-slider');
+    const domBtnCancelCrop = document.getElementById('btn-cancel-crop');
+    const domBtnConfirmCrop = document.getElementById('btn-confirm-crop');
+    const domBtnCropPhotoNew = document.getElementById('btn-crop-photo-new');
+
+    // Referências - Configurações Câmera
+    const domSettingsCamera = document.getElementById('settings-camera');
 
     // Referência - Toast
     const domToast = document.getElementById('toast');
@@ -417,6 +441,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Atualiza a URL do servidor configurada nas preferências do usuário ou usa padrão local
         const savedServerUrl = localStorage.getItem(`serverUrl_${user.username}`) || window.syncService.serverUrl;
         window.syncService.serverUrl = savedServerUrl;
+
+        // Atualiza preferência de câmera
+        const savedCamera = localStorage.getItem(`preferredCamera_${user.username}`) || 'environment';
+        domPunchCameraInput.setAttribute('capture', savedCamera);
 
         // Atualiza Elementos Fixos do Cabeçalho
         domHeaderUserName.textContent = user.name;
@@ -784,6 +812,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 `;
 
                 domTimesheetDaysContainer.appendChild(row);
+
+                // Habilita Toque Longo para Edição
+                addLongPressListener(row, () => {
+                    openEditDayModal(dateObj, dayPunches);
+                });
             }
 
             // Atualiza os cartões de resumo mensal
@@ -939,6 +972,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Preenche URL do servidor configurada
         domSettingsServerUrl.value = window.syncService.serverUrl;
 
+        // Preenche preferência da câmera
+        const savedCamera = localStorage.getItem(`preferredCamera_${state.currentUser.username}`) || 'environment';
+        domSettingsCamera.value = savedCamera;
+
         // Renderiza lista de perfis salvos para alternar
         loadAvailableProfiles();
     }
@@ -970,6 +1007,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 window.syncService.serverUrl = serverUrl;
                 localStorage.setItem(`serverUrl_${state.currentUser.username}`, serverUrl);
             }
+
+            // Salva preferência da câmera
+            const cameraPref = domSettingsCamera.value;
+            localStorage.setItem(`preferredCamera_${state.currentUser.username}`, cameraPref);
+            domPunchCameraInput.setAttribute('capture', cameraPref);
 
             // Tenta enviar o update para o servidor
             if (window.syncService.isOnline) {
@@ -1127,13 +1169,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Configuração do Upload de Fotos de Comprovante
     
-    // Área de clique central (ativa input de galeria por padrão em navegadores comuns)
+    // Área de clique central (ativa input de câmera por padrão agora)
     domImageUploadTrigger.addEventListener('click', (e) => {
-        // Se clicar no botão de remover imagem, não ativa o input novamente
-        if (e.target.closest('#btn-remove-photo')) return;
+        // Se clicar no botão de remover imagem ou no botão de recortar, não ativa o input
+        if (e.target.closest('#btn-remove-photo') || e.target.closest('#btn-crop-photo-new')) return;
         
-        // Em navegadores mobile normais, o input de tipo arquivo padrão oferece Câmera + Galeria
-        domPunchPhotoInput.click();
+        // Abre o input de câmera por padrão
+        domPunchCameraInput.click();
+    });
+
+    // Recortar foto selecionada no upload normal
+    domBtnCropPhotoNew.addEventListener('click', (e) => {
+        e.stopPropagation(); // Evita reabrir seleção
+        if (state.currentPunchPhoto) {
+            openCropModal(state.currentPunchPhoto, (croppedBase64) => {
+                state.currentPunchPhoto = croppedBase64;
+                domUploadPreviewImg.src = croppedBase64;
+                const sizeKB = Math.round((croppedBase64.length * 3) / 4 / 1024);
+                domUploadPreviewInfo.textContent = `Foto comprovante (recortada) - ~${sizeKB}KB`;
+                showToast("Comprovante recortado com sucesso!");
+            });
+        }
     });
 
     // Botões dedicados para acionar especificamente Câmera ou Galeria
@@ -1344,4 +1400,413 @@ document.addEventListener('DOMContentLoaded', async () => {
             domToast.classList.add('hidden');
         }, duration);
     }
+
+    // ==========================================================================
+    // MÓDULO DE RECORTE DE FOTO (CROP)
+    // ==========================================================================
+    const cropState = {
+        originalSrc: null,
+        targetCallback: null,
+        scale: 1,
+        x: 0,
+        y: 0,
+        isDragging: false,
+        startX: 0,
+        startY: 0
+    };
+
+    function openCropModal(originalPhotoBase64, onConfirmCallback) {
+        cropState.originalSrc = originalPhotoBase64;
+        cropState.targetCallback = onConfirmCallback;
+        cropState.scale = 1;
+        cropState.x = 0;
+        cropState.y = 0;
+        
+        domCropImage.src = originalPhotoBase64;
+        domCropZoomSlider.value = 1;
+        domCropImage.style.transform = `translate(0px, 0px) scale(1)`;
+        
+        domCropModal.classList.remove('hidden');
+    }
+
+    function closeCropModal() {
+        domCropModal.classList.add('hidden');
+        domCropImage.src = '';
+    }
+
+    // Eventos de Arrastar (Drag & Touch)
+    function startCropDrag(e) {
+        cropState.isDragging = true;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        cropState.startX = clientX - cropState.x;
+        cropState.startY = clientY - cropState.y;
+        
+        // Evita rolar a página no mobile enquanto arrasta
+        if (e.cancelable) e.preventDefault();
+    }
+
+    function moveCropDrag(e) {
+        if (!cropState.isDragging) return;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        cropState.x = clientX - cropState.startX;
+        cropState.y = clientY - cropState.startY;
+        
+        domCropImage.style.transform = `translate(${cropState.x}px, ${cropState.y}px) scale(${cropState.scale})`;
+        if (e.cancelable) e.preventDefault();
+    }
+
+    function endCropDrag() {
+        cropState.isDragging = false;
+    }
+
+    domCropViewport.addEventListener('mousedown', startCropDrag);
+    domCropViewport.addEventListener('mousemove', moveCropDrag);
+    window.addEventListener('mouseup', endCropDrag);
+
+    domCropViewport.addEventListener('touchstart', startCropDrag, { passive: false });
+    domCropViewport.addEventListener('touchmove', moveCropDrag, { passive: false });
+    window.addEventListener('touchend', endCropDrag);
+
+    // Controle de Zoom Slider
+    domCropZoomSlider.addEventListener('input', (e) => {
+        cropState.scale = parseFloat(e.target.value);
+        domCropImage.style.transform = `translate(${cropState.x}px, ${cropState.y}px) scale(${cropState.scale})`;
+    });
+
+    // Cancelar Recorte
+    domBtnCancelCrop.addEventListener('click', closeCropModal);
+    domBtnCloseCropModal.addEventListener('click', closeCropModal);
+
+    // Confirmar Recorte (Canvas)
+    domBtnConfirmCrop.addEventListener('click', () => {
+        if (!cropState.originalSrc) {
+            closeCropModal();
+            return;
+        }
+
+        try {
+            const rectV = domCropViewport.getBoundingClientRect();
+            const rectI = domCropImage.getBoundingClientRect();
+            
+            const naturalWidth = domCropImage.naturalWidth;
+            const naturalHeight = domCropImage.naturalHeight;
+            
+            const ratio = naturalWidth / rectI.width;
+            
+            const cropX = (rectV.left - rectI.left) * ratio;
+            const cropY = (rectV.top - rectI.top) * ratio;
+            const cropW = rectV.width * ratio;
+            const cropH = rectV.height * ratio;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 650;
+            canvas.height = 850;
+            
+            const ctx = canvas.getContext('2d');
+            
+            ctx.drawImage(
+                domCropImage,
+                cropX, cropY, cropW, cropH,
+                0, 0, canvas.width, canvas.height
+            );
+            
+            const croppedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+            
+            if (cropState.targetCallback) {
+                cropState.targetCallback(croppedBase64);
+            }
+            
+            closeCropModal();
+        } catch (err) {
+            console.error("Erro ao recortar imagem no Canvas:", err);
+            showToast("Falha ao recortar imagem.");
+        }
+    });
+
+    // ==========================================================================
+    // MÓDULO DE EDIÇÃO DE DIAS DA FOLHA (LONG PRESS)
+    // ==========================================================================
+    
+    function addLongPressListener(element, callback) {
+        let timer = null;
+        let isLongPress = false;
+        
+        function start(e) {
+            if (e.type === 'mousedown' && e.button !== 0) return;
+            isLongPress = false;
+            
+            timer = setTimeout(() => {
+                isLongPress = true;
+                callback(e);
+            }, 600);
+        }
+        
+        function cancel() {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        }
+        
+        function preventClick(e) {
+            if (isLongPress) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }
+        
+        element.addEventListener('touchstart', start, { passive: true });
+        element.addEventListener('touchend', cancel);
+        element.addEventListener('touchmove', cancel);
+        element.addEventListener('touchcancel', cancel);
+        
+        element.addEventListener('mousedown', start);
+        element.addEventListener('mouseup', cancel);
+        element.addEventListener('mouseleave', cancel);
+        
+        element.addEventListener('click', preventClick, true);
+        element.addEventListener('contextmenu', (e) => {
+            if (isLongPress || e.pointerType === 'touch') {
+                e.preventDefault();
+            }
+        });
+    }
+
+    function openEditDayModal(dateObj, punches) {
+        state.editingDate = dateObj;
+        state.editingPunches = punches.map(p => ({
+            id: p.id,
+            username: p.username,
+            timestamp: p.timestamp,
+            photo: p.photo,
+            synced: p.synced
+        }));
+        
+        const dateFormatted = dateObj.toLocaleDateString('pt-BR', { 
+            weekday: 'long', 
+            day: '2-digit', 
+            month: 'long', 
+            year: 'numeric' 
+        });
+        domEditModalDateLabel.textContent = dateFormatted;
+        
+        renderEditingPunches();
+        domEditDayModal.classList.remove('hidden');
+    }
+
+    function closeEditDayModal() {
+        domEditDayModal.classList.add('hidden');
+        state.editingDate = null;
+        state.editingPunches = [];
+    }
+
+    function renderEditingPunches() {
+        domEditPunchesContainer.innerHTML = '';
+        
+        if (state.editingPunches.length === 0) {
+            domEditPunchesContainer.innerHTML = `
+                <div class="empty-state" style="padding: 20px 10px;">
+                    <p>Nenhum horário registrado para este dia.</p>
+                    <span style="font-size: 11px;">Clique abaixo para adicionar um horário.</span>
+                </div>
+            `;
+            return;
+        }
+
+        state.editingPunches.sort((a, b) => a.timestamp - b.timestamp);
+
+        const cameraPref = localStorage.getItem(`preferredCamera_${state.currentUser.username}`) || 'environment';
+
+        state.editingPunches.forEach((punch, index) => {
+            const punchTime = new Date(punch.timestamp);
+            const timeStr = `${String(punchTime.getHours()).padStart(2, '0')}:${String(punchTime.getMinutes()).padStart(2, '0')}`;
+            
+            const rowEl = document.createElement('div');
+            rowEl.className = 'edit-punch-row glass';
+            rowEl.innerHTML = `
+                <div class="edit-punch-row-header">
+                    <h4>Lançamento #${index + 1}</h4>
+                    <button type="button" class="btn-delete-edit-punch" title="Remover lançamento">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+                </div>
+                <div class="edit-punch-fields">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Horário</label>
+                        <input type="time" class="edit-time-input" value="${timeStr}" style="padding: 10px; font-size: 14px;" required>
+                    </div>
+                    <div class="edit-photo-section">
+                        <div class="edit-photo-preview-container">
+                            ${punch.photo ? `<img src="${punch.photo}" class="edit-photo-preview">` : `<div class="edit-photo-placeholder">Sem comprovante</div>`}
+                        </div>
+                        <div class="edit-photo-controls">
+                            <input type="file" accept="image/*" class="edit-file-input hidden">
+                            <input type="file" accept="image/*" capture="${cameraPref}" class="edit-camera-input hidden">
+                            
+                            <button type="button" class="btn-edit-camera-trigger btn-small-outline" style="padding: 6px 10px; font-size: 11px;">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                Câmera
+                            </button>
+                            <button type="button" class="btn-edit-photo-trigger btn-small-outline" style="padding: 6px 10px; font-size: 11px;">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                                Galeria
+                            </button>
+                            
+                            ${punch.photo ? `
+                            <button type="button" class="btn-edit-crop-photo" title="Recortar" style="width: 24px; height: 24px; border-radius: 50%; border: none; background-color: var(--primary); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M6.13 1L6 16a2 2 0 0 0 2 2h15"></path><path d="M1 6.13L16 6a2 2 0 0 1 2 2v15"></path></svg>
+                            </button>
+                            <button type="button" class="btn-edit-remove-photo btn-edit-remove-photo">Remover</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const timeInput = rowEl.querySelector('.edit-time-input');
+            const btnDelete = rowEl.querySelector('.btn-delete-edit-punch');
+            const btnCamera = rowEl.querySelector('.btn-edit-camera-trigger');
+            const btnGallery = rowEl.querySelector('.btn-edit-photo-trigger');
+            const fileInput = rowEl.querySelector('.edit-file-input');
+            const cameraInput = rowEl.querySelector('.edit-camera-input');
+            const btnCrop = rowEl.querySelector('.btn-edit-crop-photo');
+            const btnRemovePhoto = rowEl.querySelector('.btn-edit-remove-photo');
+            
+            timeInput.addEventListener('change', (e) => {
+                const timeVal = e.target.value;
+                if (timeVal) {
+                    const [hours, minutes] = timeVal.split(':').map(Number);
+                    const d = new Date(punch.timestamp);
+                    d.setHours(hours);
+                    d.setMinutes(minutes);
+                    d.setSeconds(0);
+                    d.setMilliseconds(0);
+                    punch.timestamp = d.getTime();
+                    punch.synced = false;
+                }
+            });
+            
+            btnDelete.addEventListener('click', () => {
+                state.editingPunches.splice(index, 1);
+                renderEditingPunches();
+            });
+            
+            btnCamera.addEventListener('click', () => cameraInput.click());
+            btnGallery.addEventListener('click', () => fileInput.click());
+            
+            const handleFileSelect = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                showToast("Processando imagem...");
+                try {
+                    const base64 = await window.cameraService.resizeAndCompress(file, 800, 800, 0.7);
+                    punch.photo = base64;
+                    punch.synced = false;
+                    renderEditingPunches();
+                } catch (err) {
+                    showToast("Erro ao processar imagem: " + err);
+                }
+            };
+            
+            fileInput.addEventListener('change', handleFileSelect);
+            cameraInput.addEventListener('change', handleFileSelect);
+            
+            if (btnCrop) {
+                btnCrop.addEventListener('click', () => {
+                    openCropModal(punch.photo, (croppedBase64) => {
+                        punch.photo = croppedBase64;
+                        punch.synced = false;
+                        renderEditingPunches();
+                    });
+                });
+            }
+            
+            if (btnRemovePhoto) {
+                btnRemovePhoto.addEventListener('click', () => {
+                    punch.photo = null;
+                    punch.synced = false;
+                    renderEditingPunches();
+                });
+            }
+            
+            domEditPunchesContainer.appendChild(rowEl);
+        });
+    }
+
+    domBtnCloseEditModal.addEventListener('click', closeEditDayModal);
+    domBtnCancelEdit.addEventListener('click', closeEditDayModal);
+
+    domBtnAddEditPunch.addEventListener('click', () => {
+        if (!state.editingDate) return;
+        const d = state.editingDate;
+        const timestamp = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0).getTime();
+        
+        state.editingPunches.push({
+            id: 'new_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+            username: state.currentUser.username,
+            timestamp: timestamp,
+            photo: null,
+            synced: false
+        });
+        
+        renderEditingPunches();
+    });
+
+    domBtnSaveEdit.addEventListener('click', async () => {
+        if (!state.editingDate || !state.currentUser) return;
+        
+        showToast("Salvando alterações...");
+        
+        const username = state.currentUser.username;
+        const year = state.editingDate.getFullYear();
+        const month = state.editingDate.getMonth();
+        const day = state.editingDate.getDate();
+        
+        try {
+            const allPunches = await window.dbService.getPunches(username);
+            const originalDayPunches = allPunches.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day;
+            });
+            
+            const editIds = state.editingPunches.map(p => p.id);
+            const toDelete = originalDayPunches.filter(p => !editIds.includes(p.id));
+            
+            for (const p of toDelete) {
+                await window.dbService.deletePunch(p.id);
+            }
+            
+            for (const p of state.editingPunches) {
+                const finalId = p.id.startsWith('new_') 
+                    ? 'punch_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7) 
+                    : p.id;
+                    
+                const cleanPunch = {
+                    id: finalId,
+                    username: username,
+                    timestamp: p.timestamp,
+                    photo: p.photo,
+                    synced: false
+                };
+                
+                await window.dbService.savePunch(cleanPunch);
+            }
+            
+            showToast("Folha de ponto atualizada!");
+            closeEditDayModal();
+            
+            if (state.currentView === 'timesheet') {
+                await renderTimesheet();
+            } else if (state.currentView === 'home') {
+                await renderHome();
+            }
+            
+            window.syncService.triggerAutoSync();
+        } catch (err) {
+            console.error("Erro ao salvar edições do dia:", err);
+            showToast("Erro ao salvar alterações: " + err);
+        }
+    });
 });
