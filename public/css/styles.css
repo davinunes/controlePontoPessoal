@@ -1031,6 +1031,13 @@ h1, h2, h3, h4, .current-month-display {
 }
 
 /* Lista horizontal de fotos */
+.album-scroll-wrapper {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
 .album-photos-grid {
     display: flex;
     flex-wrap: nowrap;
@@ -1038,10 +1045,64 @@ h1, h2, h3, h4, .current-month-display {
     gap: 12px;
     padding-bottom: 8px;
     scrollbar-width: none; /* Firefox */
+    cursor: grab;
+    width: 100%;
+    scroll-behavior: smooth;
+    user-select: none;
+}
+
+.album-photos-grid:active {
+    cursor: grabbing;
 }
 
 .album-photos-grid::-webkit-scrollbar {
     display: none; /* Safari e Chrome */
+}
+
+/* Botões de rolagem lateral */
+.scroll-btn {
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border-glass);
+    background: var(--bg-glass-heavy);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    transition: var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.scroll-btn:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px var(--primary-glow);
+}
+
+.scroll-btn:active {
+    transform: scale(0.95);
+}
+
+.scroll-btn.scroll-prev {
+    left: -12px;
+}
+
+.scroll-btn.scroll-next {
+    right: -12px;
+}
+
+@media (max-width: 480px) {
+    .scroll-btn {
+        display: none !important;
+    }
 }
 
 .album-photo-wrapper {

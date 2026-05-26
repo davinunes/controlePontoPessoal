@@ -983,14 +983,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 rowSection.innerHTML = `
                     <h4 class="album-day-title">${dayLabel}</h4>
-                    <div class="album-photos-grid" id="album-grid-day-${day}">
-                        <!-- Fotos serão inseridas aqui -->
+                    <div class="album-scroll-wrapper">
+                        <button class="scroll-btn scroll-prev hidden" aria-label="Anterior">
+                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        </button>
+                        <div class="album-photos-grid" id="album-grid-day-${day}">
+                            <!-- Fotos serão inseridas aqui -->
+                        </div>
+                        <button class="scroll-btn scroll-next hidden" aria-label="Próximo">
+                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </button>
                     </div>
                 `;
 
                 domAlbumDaysContainer.appendChild(rowSection);
 
                 const grid = document.getElementById(`album-grid-day-${day}`);
+                const btnPrev = rowSection.querySelector('.scroll-prev');
+                const btnNext = rowSection.querySelector('.scroll-next');
 
                 dayPunches.forEach(punch => {
                     const timeStr = new Date(punch.timestamp).toLocaleTimeString('pt-BR', { 
@@ -1011,12 +1021,102 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                     grid.appendChild(wrapper);
                 });
+
+                // Configura as setas e o drag
+                setupScrollContainer(grid, btnPrev, btnNext);
             });
 
         } catch (e) {
             console.error("Erro ao renderizar Álbum:", e);
             showToast("Erro ao carregar álbum de comprovantes.");
         }
+    }
+
+    /**
+     * Gerencia a rolagem horizontal via botões de setas
+     */
+    function setupScrollContainer(grid, btnPrev, btnNext) {
+        function updateArrows() {
+            const scrollLeft = grid.scrollLeft;
+            const maxScroll = grid.scrollWidth - grid.clientWidth;
+
+            if (scrollLeft > 2) {
+                btnPrev.classList.remove('hidden');
+            } else {
+                btnPrev.classList.add('hidden');
+            }
+
+            if (scrollLeft < maxScroll - 2) {
+                btnNext.classList.remove('hidden');
+            } else {
+                btnNext.classList.add('hidden');
+            }
+        }
+
+        btnPrev.addEventListener('click', () => {
+            grid.scrollBy({ left: -200, behavior: 'smooth' });
+        });
+
+        btnNext.addEventListener('click', () => {
+            grid.scrollBy({ left: 200, behavior: 'smooth' });
+        });
+
+        grid.addEventListener('scroll', updateArrows);
+        
+        // Pequeno timeout para esperar o DOM renderizar completamente
+        setTimeout(updateArrows, 100);
+        
+        // Evita vazamento de memória usando ResizeObserver em vez de event listener na window
+        const resizeObserver = new ResizeObserver(() => {
+            updateArrows();
+        });
+        resizeObserver.observe(grid);
+        
+        enableDragScroll(grid, updateArrows);
+    }
+
+    /**
+     * Habilita a rolagem ao arrastar o mouse (drag scroll)
+     */
+    function enableDragScroll(element, onScrollCallback) {
+        let isDown = false;
+        let startX;
+        let scrollLeft;
+        let moved = false;
+
+        element.addEventListener('mousedown', (e) => {
+            isDown = true;
+            moved = false;
+            startX = e.pageX - element.offsetLeft;
+            scrollLeft = element.scrollLeft;
+        });
+
+        element.addEventListener('mouseleave', () => {
+            isDown = false;
+        });
+
+        element.addEventListener('mouseup', () => {
+            isDown = false;
+        });
+
+        element.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            e.preventDefault();
+            const x = e.pageX - element.offsetLeft;
+            const walk = (x - startX) * 1.5;
+            if (Math.abs(x - startX) > 5) {
+                moved = true;
+            }
+            element.scrollLeft = scrollLeft - walk;
+            if (onScrollCallback) onScrollCallback();
+        });
+
+        element.addEventListener('click', (e) => {
+            if (moved) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
     }
 
     // ==========================================================================
