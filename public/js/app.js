@@ -13,7 +13,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentPunchPhoto: null,     // Base64 da foto do comprovante em seleção
         availableUsers: [],          // Lista de perfis salvos neste dispositivo
         editingDate: null,           // Objeto Date sendo editado atualmente
-        editingPunches: []           // Lista de punches temporários da edição do dia
+        editingPunches: [],          // Lista de punches temporários da edição do dia
+        simulationInterval: null     // Intervalo para atualização da simulação de batida "agora"
     };
 
     // Referências de Elementos do DOM - Autenticação
@@ -214,6 +215,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             domBtnPunchFab.classList.add('hidden');
         } else {
             domBtnPunchFab.classList.remove('hidden');
+        }
+
+        // Para a simulação se navegar para fora da home
+        if (viewName !== 'home' && state.simulationInterval) {
+            clearInterval(state.simulationInterval);
+            state.simulationInterval = null;
         }
 
         // Renderiza a tela específica
@@ -603,7 +610,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             // ====================================================
             // CÁLCULO E RENDERIZAÇÃO DO BANCO DE HORAS ACUMULADO DO MÊS
             // ====================================================
-            renderHomeMonthSummary(allPunches);
+            const totalBalance = renderHomeMonthSummary(allPunches);
+
+            // Inicia simulação de batida "agora"
+            startSimulation(todayPunches, totalBalance);
 
         } catch (e) {
             console.error("Erro ao carregar dados da Home:", e);
@@ -680,6 +690,70 @@ document.addEventListener('DOMContentLoaded', async () => {
             domHomeMonthProgress.className = 'progress-bar-fill';
             domHomeMonthProgress.style.width = '50%';
         }
+        return totalBalance;
+    }
+
+    /**
+     * Inicia a simulação do saldo diário e mensal atualizados a cada segundo
+     */
+    function startSimulation(todayPunches, totalBalance) {
+        if (state.simulationInterval) {
+            clearInterval(state.simulationInterval);
+            state.simulationInterval = null;
+        }
+
+        const isWorking = todayPunches.length % 2 !== 0;
+        const domMonthSimulated = document.getElementById('home-month-simulated');
+        const domDaySimulated = document.getElementById('home-day-simulated');
+
+        if (!isWorking || !state.currentUser) {
+            if (domMonthSimulated) domMonthSimulated.classList.add('hidden');
+            if (domDaySimulated) domDaySimulated.classList.add('hidden');
+            return;
+        }
+
+        if (domMonthSimulated) domMonthSimulated.classList.remove('hidden');
+        if (domDaySimulated) domDaySimulated.classList.remove('hidden');
+
+        const journeyMinutes = state.currentUser.journey;
+        const lastPunch = todayPunches[todayPunches.length - 1];
+
+        // Pré-calculo estático dos outros dias do mês em segundos para evitar erros de precisão
+        const workedSecondsToday = calculateWorkedSeconds(todayPunches);
+        const workedMinutesToday = Math.floor(workedSecondsToday / 60);
+        const currentDayBalanceMin = workedMinutesToday - journeyMinutes;
+        const otherDaysBalanceMin = totalBalance - currentDayBalanceMin;
+        const otherDaysBalanceSec = otherDaysBalanceMin * 60;
+
+        function update() {
+            const now = new Date();
+            const activeSeconds = Math.floor((now - new Date(lastPunch.timestamp)) / 1000);
+            
+            const simulatedWorkedSeconds = workedSecondsToday + Math.max(0, activeSeconds);
+            const simulatedDayBalanceSec = simulatedWorkedSeconds - (journeyMinutes * 60);
+            const simulatedTotalBalanceSec = otherDaysBalanceSec + simulatedDayBalanceSec;
+
+            // Atualiza chip de simulação do dia
+            if (domDaySimulated) {
+                domDaySimulated.innerHTML = `
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" class="timer-icon"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    Se bater agora: ${formatSimulatedBalanceText(simulatedDayBalanceSec)}
+                `;
+                domDaySimulated.className = 'simulation-chip ' + (simulatedDayBalanceSec >= 0 ? 'positive' : 'negative');
+            }
+
+            // Atualiza chip de simulação do mês
+            if (domMonthSimulated) {
+                domMonthSimulated.innerHTML = `
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" class="timer-icon"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    Projeção se bater agora: ${formatSimulatedBalanceText(simulatedTotalBalanceSec)}
+                `;
+                domMonthSimulated.className = 'simulation-chip ' + (simulatedTotalBalanceSec >= 0 ? 'positive' : 'negative');
+            }
+        }
+
+        update();
+        state.simulationInterval = setInterval(update, 1000);
     }
 
     // ==========================================================================
@@ -1101,6 +1175,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Botão Sair da Conta (Logout)
     domBtnLogout.addEventListener('click', () => {
         if (confirm("Deseja realmente sair de sua conta?")) {
+            if (state.simulationInterval) {
+                clearInterval(state.simulationInterval);
+                state.simulationInterval = null;
+            }
             showAuthScreen();
             showToast("Sessão finalizada.");
         }
@@ -1374,6 +1452,52 @@ document.addEventListener('DOMContentLoaded', async () => {
             return `-${formatted}`;
         }
         return (showNeutralPlus ? '+' : '') + formatted;
+    }
+
+    /**
+     * Calcula o total de segundos trabalhados no dia com base nas batidas de ponto.
+     */
+    function calculateWorkedSeconds(punches) {
+        let totalSeconds = 0;
+        
+        // Garante ordenação cronológica
+        const sorted = [...punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Calcula a duração entre pares ordenados: (P1 a P2), (P3 a P4), etc.
+        for (let i = 0; i < sorted.length - 1; i += 2) {
+            const start = new Date(sorted[i].timestamp);
+            const end = new Date(sorted[i+1].timestamp);
+            const diffMs = end - start;
+            if (diffMs > 0) {
+                totalSeconds += Math.floor(diffMs / 1000);
+            }
+        }
+
+        return totalSeconds;
+    }
+
+    /**
+     * Converte segundos em formato amigável de horas "XXh YYm ZZs"
+     */
+    function formatSecondsToHoursText(totalSeconds) {
+        const absSeconds = Math.abs(totalSeconds);
+        const hrs = String(Math.floor(absSeconds / 3600)).padStart(2, '0');
+        const mins = String(Math.floor((absSeconds % 3600) / 60)).padStart(2, '0');
+        const secs = String(absSeconds % 60).padStart(2, '0');
+        return `${hrs}h ${mins}m ${secs}s`;
+    }
+
+    /**
+     * Formata um saldo de segundos positivo ou negativo com sinal de +/-
+     */
+    function formatSimulatedBalanceText(balanceSeconds) {
+        const formatted = formatSecondsToHoursText(balanceSeconds);
+        if (balanceSeconds > 0) {
+            return `+${formatted}`;
+        } else if (balanceSeconds < 0) {
+            return `-${formatted}`;
+        }
+        return formatted;
     }
 
     /**

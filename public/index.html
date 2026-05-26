@@ -125,6 +125,7 @@
                             <span class="metric-value" id="home-month-balance">00h 00m</span>
                             <span class="metric-trend-indicator" id="home-month-trend">Estável</span>
                         </div>
+                        <span id="home-month-simulated" class="simulation-chip hidden"></span>
                     </div>
                     <div class="progress-bar-container">
                         <div class="progress-bar-fill" id="home-month-progress" style="width: 50%;"></div>
@@ -136,6 +137,20 @@
 
                 <!-- Lista de Registros do Dia Corrente -->
                 <div class="daily-records-section">
+                    <!-- Resumo de Horas Trabalhadas Hoje -->
+                    <div class="day-summary-footer glass hidden" id="home-day-summary">
+                        <div class="summary-item">
+                            <span class="summary-label">Trabalhado hoje:</span>
+                            <strong class="summary-value" id="home-day-worked">00h 00m</strong>
+                        </div>
+                        <div class="summary-divider"></div>
+                        <div class="summary-item">
+                            <span class="summary-label">Saldo do dia:</span>
+                            <strong class="summary-value positive" id="home-day-balance">00h 00m</strong>
+                            <span id="home-day-simulated" class="simulation-chip hidden"></span>
+                        </div>
+                    </div>
+
                     <div class="section-header">
                         <h3>Registros de Hoje</h3>
                         <span class="records-count" id="home-records-count">0 batidas</span>
@@ -149,19 +164,6 @@
                             </div>
                             <p>Nenhum ponto registrado hoje.</p>
                             <span>Clique no botão azul abaixo para registrar seu ponto.</span>
-                        </div>
-                    </div>
-
-                    <!-- Resumo de Horas Trabalhadas Hoje -->
-                    <div class="day-summary-footer glass hidden" id="home-day-summary">
-                        <div class="summary-item">
-                            <span class="summary-label">Trabalhado hoje:</span>
-                            <strong class="summary-value" id="home-day-worked">00h 00m</strong>
-                        </div>
-                        <div class="summary-divider"></div>
-                        <div class="summary-item">
-                            <span class="summary-label">Saldo do dia:</span>
-                            <strong class="summary-value positive" id="home-day-balance">00h 00m</strong>
                         </div>
                     </div>
                 </div>
