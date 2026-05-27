@@ -52,21 +52,88 @@ function getUserPunchesPath(username) {
 }
 
 function readUserPunches(username) {
-    const filePath = getUserPunchesPath(username);
-    if (!fs.existsSync(filePath)) {
-        return [];
+    const safeUsername = username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    let allPunches = [];
+
+    // 1. Ler arquivo legado se existir
+    const legacyPath = getUserPunchesPath(username);
+    if (fs.existsSync(legacyPath)) {
+        try {
+            const data = fs.readFileSync(legacyPath, 'utf8');
+            allPunches = allPunches.concat(JSON.parse(data));
+        } catch (e) {
+            console.error(`Erro ao ler arquivo legado para ${username}:`, e);
+        }
     }
+
+    // 2. Ler todos os arquivos mensais particionados
     try {
-        const data = fs.readFileSync(filePath, 'utf8');
-        return JSON.parse(data);
+        const files = fs.readdirSync(DATA_DIR);
+        const monthlyPattern = new RegExp(`^punches_${safeUsername}_(\\d{4})_(\\d{2})\\.json$`);
+        files.forEach(file => {
+            const match = file.match(monthlyPattern);
+            if (match) {
+                const filePath = path.join(DATA_DIR, file);
+                try {
+                    const data = fs.readFileSync(filePath, 'utf8');
+                    allPunches = allPunches.concat(JSON.parse(data));
+                } catch (e) {
+                    console.error(`Erro ao ler arquivo mensal ${file}:`, e);
+                }
+            }
+        });
     } catch (e) {
-        return [];
+        console.error(`Erro ao listar diretório de dados para ${username}:`, e);
     }
+
+    // Remover duplicatas por id
+    const map = new Map();
+    allPunches.forEach(p => {
+        if (p && p.id) {
+            map.set(p.id, p);
+        }
+    });
+    return Array.from(map.values());
 }
 
 function writeUserPunches(username, punches) {
-    const filePath = getUserPunchesPath(username);
-    fs.writeFileSync(filePath, JSON.stringify(punches, null, 2));
+    const safeUsername = username.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+    // Agrupar pontos por YYYY_MM
+    const grouped = {};
+    punches.forEach(punch => {
+        if (!punch) return;
+        const date = new Date(punch.timestamp);
+        let year = date.getFullYear();
+        let month = String(date.getMonth() + 1).padStart(2, '0');
+        if (isNaN(year)) {
+            const now = new Date();
+            year = now.getFullYear();
+            month = String(now.getMonth() + 1).padStart(2, '0');
+        }
+        const key = `${year}_${month}`;
+        if (!grouped[key]) {
+            grouped[key] = [];
+        }
+        grouped[key].push(punch);
+    });
+
+    // Salvar cada grupo no seu respectivo arquivo mensal
+    for (const [key, list] of Object.entries(grouped)) {
+        const filePath = path.join(DATA_DIR, `punches_${safeUsername}_${key}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(list, null, 2));
+    }
+
+    // Deletar o arquivo legado para finalizar a migração
+    const legacyPath = getUserPunchesPath(username);
+    if (fs.existsSync(legacyPath)) {
+        try {
+            fs.unlinkSync(legacyPath);
+            console.log(`[Migração] Arquivo legado de punches migrado e removido: punches_${safeUsername}.json`);
+        } catch (e) {
+            console.error(`Erro ao deletar arquivo legado punches_${safeUsername}.json:`, e);
+        }
+    }
 }
 
 // ==========================================================================
@@ -170,10 +237,13 @@ app.post('/api/sync', (req, res) => {
         if (cliPunch.deleted) {
             // Se o cliente marcou como deletado, aplica exclusão lógica ou física
             if (srvPunch) {
+                Object.assign(srvPunch, cliPunch);
+                srvPunch.synced = true;
                 srvPunch.deleted = true;
                 srvPunch.updatedAt = new Date().toISOString();
             } else {
                 // Caso não existisse no servidor, já marca como deletado no mapa local
+                cliPunch.synced = true;
                 cliPunch.updatedAt = new Date().toISOString();
                 serverMap.set(cliPunch.id, cliPunch);
             }
@@ -185,8 +255,8 @@ app.post('/api/sync', (req, res) => {
                 serverMap.set(cliPunch.id, cliPunch);
             } else {
                 // Em caso de conflito, atualiza os campos, mas mantém integridade
-                srvPunch.timestamp = cliPunch.timestamp;
-                srvPunch.photo = cliPunch.photo !== undefined ? cliPunch.photo : srvPunch.photo;
+                Object.assign(srvPunch, cliPunch);
+                srvPunch.synced = true;
                 srvPunch.deleted = false;
                 srvPunch.updatedAt = new Date().toISOString();
             }

@@ -2000,3 +2000,257 @@ h1, h2, h3, h4, .current-month-display {
     100% { transform: scale(1); }
 }
 
+/* ======================================================== */
+/* ADIÇÕES: DROPDOWN DE AÇÕES, ABONOS E IMPRESSÃO           */
+/* ======================================================== */
+
+/* Menu de Ações na Home */
+.punch-actions-menu {
+    position: relative;
+    display: inline-block;
+}
+
+.btn-actions-punch {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: var(--transition-fast);
+}
+
+.btn-actions-punch:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.punch-actions-dropdown {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 4px;
+    background-color: var(--bg-glass-heavy);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    min-width: 140px;
+    display: none;
+    animation: fadeIn var(--transition-fast);
+    overflow: hidden;
+}
+
+.punch-actions-dropdown.show {
+    display: block;
+}
+
+.punch-actions-item {
+    width: 100%;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.punch-actions-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.punch-actions-item.delete {
+    color: var(--danger);
+}
+
+.punch-actions-item.delete:hover {
+    background-color: var(--danger-glow);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Ajuste do grid de 5 itens no bottom nav */
+.app-nav {
+    grid-template-columns: repeat(5, 1fr) !important;
+}
+
+/* Estilos da Tela de Abonos */
+.abonos-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+    padding-bottom: 90px; /* Evita que o bottom nav cubra a lista */
+}
+
+.abono-card {
+    padding: 16px;
+    border-radius: var(--radius-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid var(--border-glass);
+    background-color: rgba(255, 255, 255, 0.01);
+    transition: var(--transition-fast);
+}
+
+.abono-card:hover {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.abono-info-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+
+.abono-date-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-sm);
+    background-color: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    color: var(--success);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    flex-shrink: 0;
+}
+
+.abono-date-day {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.abono-date-month {
+    font-size: 9px;
+    text-transform: uppercase;
+    font-weight: 500;
+}
+
+.abono-details {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.abono-reason-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.abono-type-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.badge-abono {
+    display: inline-flex;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 600;
+    background-color: rgba(16, 185, 129, 0.12);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    width: fit-content;
+}
+
+.badge-abono.period {
+    background-color: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.abono-photo-thumb {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    object-fit: cover;
+    border: 1px solid var(--border-glass);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.abono-card-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Dias abonados na Folha */
+.day-row.abonado-dia {
+    border-left: 4px solid var(--success) !important;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.04) 0%, transparent 100%) !important;
+}
+
+.day-row.abonado-periodo {
+    border-left: 4px solid #f59e0b !important;
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.04) 0%, transparent 100%) !important;
+}
+
+.day-row-abono-indicator {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-top: 2px;
+    width: fit-content;
+}
+
+.day-row-abono-indicator.dia {
+    background-color: rgba(16, 185, 129, 0.12);
+    color: var(--success);
+}
+
+.day-row-abono-indicator.periodo {
+    background-color: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+}
+
+/* Seção de Abono na Edição do Dia */
+.edit-abono-section {
+    padding: 12px;
+    border-radius: var(--radius-md);
+    background-color: rgba(255,255,255,0.01);
+    border: 1px solid var(--border-glass);
+    margin-bottom: 16px;
+}
+
+.edit-abono-section h4 {
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+/* Estilos de Impressão de Comprovantes (Colmeia) */
+@media print {
+    body {
+        background: #fff !important;
+        color: #000 !important;
+    }
+    .app-container, .modal-overlay, .toast, .btn-fab {
+        display: none !important;
+    }
+}
+

@@ -10,10 +10,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentView: 'home',         // Tela ativa ('home', 'timesheet', 'album', 'settings')
         selectedMonth: new Date(),   // Mês de referência para Folha de Ponto
         albumMonth: new Date(),      // Mês de referência para Álbum de Comprovantes
+        abonosMonth: new Date(),     // Mês de referência para Abonos
         currentPunchPhoto: null,     // Base64 da foto do comprovante em seleção
+        currentAbonoPhoto: null,     // Base64 da foto do atestado/comprovante de abono
         availableUsers: [],          // Lista de perfis salvos neste dispositivo
         editingDate: null,           // Objeto Date sendo editado atualmente
         editingPunches: [],          // Lista de punches temporários da edição do dia
+        editingPunchId: null,        // ID do punch específico sendo editado na Home
         simulationInterval: null     // Intervalo para atualização da simulação de batida "agora"
     };
 
@@ -140,6 +143,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Referências - Configurações Câmera
     const domSettingsCamera = document.getElementById('settings-camera');
 
+    // Referências - Tela de Abonos
+    const domAbonosMonthLabel = document.getElementById('abonos-month-label');
+    const domAbonosPrevMonth = document.getElementById('abonos-prev-month');
+    const domAbonosNextMonth = document.getElementById('abonos-next-month');
+    const domAbonosListContainer = document.getElementById('abonos-list-container');
+    const domBtnAddAbonoTrigger = document.getElementById('btn-add-abono-trigger');
+    const domBtnExportPdf = document.getElementById('btn-export-pdf');
+
+    // Referências - Modal de Abono
+    const domAbonoModal = document.getElementById('abono-modal');
+    const domAbonoModalTitle = document.getElementById('abono-modal-title');
+    const domBtnCloseAbonoModal = document.getElementById('btn-close-abono-modal');
+    const domAbonoForm = document.getElementById('abono-form');
+    const domAbonoId = document.getElementById('abono-id');
+    const domAbonoDate = document.getElementById('abono-date');
+    const domAbonoReason = document.getElementById('abono-reason');
+    const domAbonoType = document.getElementById('abono-type');
+    const domAbonoPeriodFields = document.getElementById('abono-period-fields');
+    const domAbonoStartTime = document.getElementById('abono-start-time');
+    const domAbonoEndTime = document.getElementById('abono-end-time');
+    const domAbonoPhotoInput = document.getElementById('abono-photo-input');
+    const domAbonoCameraInput = document.getElementById('abono-camera-input');
+    const domAbonoImageUploadTrigger = document.getElementById('abono-image-upload-trigger');
+    const domAbonoUploadPlaceholder = document.getElementById('abono-upload-placeholder');
+    const domAbonoUploadPreviewContainer = document.getElementById('abono-upload-preview-container');
+    const domAbonoUploadPreviewImg = document.getElementById('abono-upload-preview-img');
+    const domAbonoUploadPreviewInfo = document.getElementById('abono-upload-preview-info');
+    const domBtnAbonoRemovePhoto = document.getElementById('btn-abono-remove-photo');
+    const domBtnAbonoTriggerCamera = document.getElementById('btn-abono-trigger-camera');
+    const domBtnAbonoTriggerGallery = document.getElementById('btn-abono-trigger-gallery');
+    const domBtnCancelAbono = document.getElementById('btn-cancel-abono');
+    const domBtnCropPhotoAbono = document.getElementById('btn-crop-photo-abono');
+
+    // Referências - Modal de Confirmação Customizado
+    const domConfirmModal = document.getElementById('confirm-modal');
+    const domConfirmTitle = document.getElementById('confirm-title');
+    const domConfirmMessage = document.getElementById('confirm-message');
+    const domBtnConfirmYes = document.getElementById('btn-confirm-yes');
+    const domBtnConfirmNo = document.getElementById('btn-confirm-no');
+
     // Referência - Toast
     const domToast = document.getElementById('toast');
     let toastTimeout = null;
@@ -210,8 +253,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
 
-        // FAB só aparece nas visualizações diárias, mensais e fotos. Oculta no Ajustes para limpar a UI.
-        if (viewName === 'settings') {
+        // FAB só aparece nas visualizações diárias, mensais e fotos. Oculta no Ajustes e Abonos para limpar a UI.
+        if (viewName === 'settings' || viewName === 'abonos') {
             domBtnPunchFab.classList.add('hidden');
         } else {
             domBtnPunchFab.classList.remove('hidden');
@@ -245,6 +288,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'timesheet':
                 renderTimesheet();
+                break;
+            case 'abonos':
+                renderAbonos();
                 break;
             case 'album':
                 renderAlbum();
@@ -501,12 +547,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         domHomeUserJourney.textContent = formatMinutesToTime(state.currentUser.journey);
 
         try {
-            // Busca todos os pontos
-            const allPunches = await window.dbService.getPunches(username);
+            // Busca todos os pontos (que inclui abonos)
+            const allPunchesRaw = await window.dbService.getPunches(username);
+            const allPunches = allPunchesRaw.filter(p => !p.isAbono);
+            const allAbonos = allPunchesRaw.filter(p => p.isAbono);
             
             // Filtra pontos de HOJE (com base na data local)
             const todayStr = now.toLocaleDateString('pt-BR');
             const todayPunches = allPunches.filter(p => new Date(p.timestamp).toLocaleDateString('pt-BR') === todayStr);
+            const todayAbono = allAbonos.find(a => new Date(a.timestamp).toLocaleDateString('pt-BR') === todayStr);
+
+            // Adiciona ou remove badge de abono hoje
+            let domAbonoBadge = document.getElementById('home-today-abono-badge');
+            if (!domAbonoBadge) {
+                domAbonoBadge = document.createElement('span');
+                domAbonoBadge.id = 'home-today-abono-badge';
+                domHomeRecordsCount.parentNode.insertBefore(domAbonoBadge, domHomeRecordsCount);
+            }
+            if (todayAbono) {
+                const text = todayAbono.abonoType === 'day' 
+                    ? `Abonado [${todayAbono.reason}]` 
+                    : `Abono ${todayAbono.abonoStart}-${todayAbono.abonoEnd} [${todayAbono.reason}]`;
+                domAbonoBadge.className = 'badge-abono ' + (todayAbono.abonoType === 'period' ? 'period' : '');
+                domAbonoBadge.style.marginLeft = '8px';
+                domAbonoBadge.style.display = 'inline-flex';
+                domAbonoBadge.textContent = text;
+            } else {
+                domAbonoBadge.style.display = 'none';
+            }
 
             // Atualiza quantidade
             domHomeRecordsCount.textContent = todayPunches.length === 1 
@@ -558,9 +626,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                         </div>
                         <div class="punch-card-right">
                             ${photoHtml}
-                            <button class="btn-delete-punch" data-id="${punch.id}" title="Excluir batida">
-                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                            </button>
+                            <div class="punch-actions-menu">
+                                <button class="btn-actions-punch" data-id="${punch.id}" title="Ações">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+                                </button>
+                                <div class="punch-actions-dropdown" id="dropdown-${punch.id}">
+                                    <button type="button" class="punch-actions-item edit" data-id="${punch.id}">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path></svg>
+                                        Editar
+                                    </button>
+                                    <button type="button" class="punch-actions-item delete" data-id="${punch.id}">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path></svg>
+                                        Excluir
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     `;
 
@@ -576,11 +656,41 @@ document.addEventListener('DOMContentLoaded', async () => {
                     });
                 });
 
-                // Registra cliques de exclusão
-                domHomePunchesList.querySelectorAll('.btn-delete-punch').forEach(btn => {
-                    btn.addEventListener('click', async () => {
+                // Registra cliques de ações (toggle dropdown)
+                domHomePunchesList.querySelectorAll('.btn-actions-punch').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
                         const pid = btn.getAttribute('data-id');
-                        if (confirm("Deseja realmente excluir este ponto?")) {
+                        const dropdown = document.getElementById(`dropdown-${pid}`);
+                        
+                        document.querySelectorAll('.punch-actions-dropdown').forEach(d => {
+                            if (d !== dropdown) d.classList.remove('show');
+                        });
+                        dropdown.classList.toggle('show');
+                    });
+                });
+
+                // Clique fora fecha dropdowns
+                document.addEventListener('click', () => {
+                    document.querySelectorAll('.punch-actions-dropdown').forEach(d => d.classList.remove('show'));
+                });
+
+                // Registra cliques de edição de ponto
+                domHomePunchesList.querySelectorAll('.punch-actions-item.edit').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const pid = btn.getAttribute('data-id');
+                        const punch = todayPunches.find(x => x.id === pid);
+                        if (punch) openEditPunchModal(punch);
+                    });
+                });
+
+                // Registra cliques de exclusão de ponto
+                domHomePunchesList.querySelectorAll('.punch-actions-item.delete').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const pid = btn.getAttribute('data-id');
+                        showConfirmModal("Excluir Ponto", "Deseja realmente excluir este registro de ponto?", async () => {
                             try {
                                 await window.dbService.deletePunch(pid);
                                 showToast("Ponto marcado para exclusão.");
@@ -589,14 +699,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                             } catch (err) {
                                 showToast(err);
                             }
-                        }
+                        });
                     });
                 });
 
-                // Cálculo diário
-                const workedToday = calculateWorkedMinutes(todayPunches);
-                const journeyMinutes = state.currentUser.journey;
-                const balanceToday = workedToday - journeyMinutes;
+                // Cálculo diário considerando abonos
+                const standardJourney = state.currentUser.journey;
+                const result = calculateDayWorkedAndExpected(todayPunches, todayAbono, standardJourney);
+                const workedToday = result.workedMinutes;
+                const balanceToday = result.balance;
 
                 domHomeDayWorked.textContent = formatMinutesToHoursText(workedToday);
                 domHomeDayBalance.textContent = formatBalanceText(balanceToday, true);
@@ -610,10 +721,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             // ====================================================
             // CÁLCULO E RENDERIZAÇÃO DO BANCO DE HORAS ACUMULADO DO MÊS
             // ====================================================
-            const totalBalance = renderHomeMonthSummary(allPunches);
+            const totalBalance = renderHomeMonthSummary(allPunches, allAbonos);
 
             // Inicia simulação de batida "agora"
-            startSimulation(todayPunches, totalBalance);
+            startSimulation(todayPunches, totalBalance, todayAbono);
 
         } catch (e) {
             console.error("Erro ao carregar dados da Home:", e);
@@ -624,7 +735,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     /**
      * Calcula o banco de horas acumulado do mês e atualiza os elementos visuais na Home.
      */
-    function renderHomeMonthSummary(allPunches) {
+    function renderHomeMonthSummary(allPunches, allAbonos) {
         const now = new Date();
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth(); // 0-indexed
@@ -649,17 +760,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         let totalWorked = 0;
         let totalExpected = 0;
 
-        punchesByDay.forEach((dayPunches) => {
+        punchesByDay.forEach((dayPunches, dayDateStr) => {
             // Ordena cronologicamente
             dayPunches.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             
-            const workedMin = calculateWorkedMinutes(dayPunches);
-            const expectedMin = state.currentUser.journey;
-            const balanceMin = workedMin - expectedMin;
+            // Encontra se tem abono no dia
+            const dayAbono = allAbonos.find(a => new Date(a.timestamp).toLocaleDateString('pt-BR') === dayDateStr);
+            const standardJourney = state.currentUser.journey;
+            
+            const result = calculateDayWorkedAndExpected(dayPunches, dayAbono, standardJourney);
 
-            totalWorked += workedMin;
-            totalExpected += expectedMin;
-            totalBalance += balanceMin;
+            totalWorked += result.workedMinutes;
+            totalExpected += result.expectedJourney;
+            totalBalance += result.balance;
         });
 
         // Atualiza os elementos na UI
@@ -696,7 +809,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     /**
      * Inicia a simulação do saldo diário e mensal atualizados a cada segundo
      */
-    function startSimulation(todayPunches, totalBalance) {
+    function startSimulation(todayPunches, totalBalance, todayAbono) {
         if (state.simulationInterval) {
             clearInterval(state.simulationInterval);
             state.simulationInterval = null;
@@ -716,21 +829,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (domDaySimulated) domDaySimulated.classList.remove('hidden');
 
         const journeyMinutes = state.currentUser.journey;
-        const lastPunch = todayPunches[todayPunches.length - 1];
 
-        // Pré-calculo estático dos outros dias do mês em segundos para evitar erros de precisão
-        const workedSecondsToday = calculateWorkedSeconds(todayPunches);
-        const workedMinutesToday = Math.floor(workedSecondsToday / 60);
-        const currentDayBalanceMin = workedMinutesToday - journeyMinutes;
+        // Pré-calculo estático dos outros dias do mês em segundos
+        const todayResult = calculateDayWorkedAndExpected(todayPunches, todayAbono, journeyMinutes);
+        const currentDayBalanceMin = todayResult.balance;
         const otherDaysBalanceMin = totalBalance - currentDayBalanceMin;
         const otherDaysBalanceSec = otherDaysBalanceMin * 60;
 
         function update() {
-            const now = new Date();
-            const activeSeconds = Math.floor((now - new Date(lastPunch.timestamp)) / 1000);
-            
-            const simulatedWorkedSeconds = workedSecondsToday + Math.max(0, activeSeconds);
-            const simulatedDayBalanceSec = simulatedWorkedSeconds - (journeyMinutes * 60);
+            const sim = calculateSimulatedSeconds(todayPunches, todayAbono, journeyMinutes);
+            const simulatedDayBalanceSec = sim.balanceSeconds;
             const simulatedTotalBalanceSec = otherDaysBalanceSec + simulatedDayBalanceSec;
 
             // Atualiza chip de simulação do dia
@@ -784,10 +892,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         try {
             // Busca pontos totais e filtra
-            const allPunches = await window.dbService.getPunches(username);
-            const monthPunches = allPunches.filter(p => {
+            const allPunchesRaw = await window.dbService.getPunches(username);
+            
+            // Separa batidas de abonos
+            const monthPunches = allPunchesRaw.filter(p => {
                 const d = new Date(p.timestamp);
-                return d.getFullYear() === year && d.getMonth() === month;
+                return d.getFullYear() === year && d.getMonth() === month && !p.isAbono;
+            });
+            const monthAbonos = allPunchesRaw.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && p.isAbono && !p.deleted;
             });
 
             // Agrupa pontos por dia
@@ -819,13 +933,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const dayPunches = punchesByDay[day] || [];
                 dayPunches.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
+                // Busca abono do dia
+                const dayAbono = monthAbonos.find(a => new Date(a.timestamp).getDate() === day);
+
                 let punchesText = '';
                 let workedMin = 0;
                 let balanceMin = 0;
                 let hasPhotos = false;
 
+                const standardJourney = state.currentUser.journey;
+                const result = calculateDayWorkedAndExpected(dayPunches, dayAbono, standardJourney);
+                workedMin = result.workedMinutes;
+                const expectedMin = result.expectedJourney;
+                balanceMin = result.balance;
+
                 if (dayPunches.length > 0) {
                     daysWorkedCount++;
+                }
+
+                if (dayPunches.length > 0 || dayAbono) {
                     // Horários formatados: "08:00 • 12:00 • 13:00 • 17:00"
                     punchesText = dayPunches.map(p => {
                         if (p.photo) hasPhotos = true;
@@ -835,10 +961,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                         });
                     }).join(' • ');
 
-                    workedMin = calculateWorkedMinutes(dayPunches);
-                    const expectedMin = state.currentUser.journey;
-                    balanceMin = workedMin - expectedMin;
-
                     totalWorkedMinutes += workedMin;
                     totalExpectedMinutes += expectedMin;
                     totalBalanceMinutes += balanceMin;
@@ -846,11 +968,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Cria elemento de linha do dia
                 const row = document.createElement('div');
-                row.className = `day-row glass ${isWeekend ? 'weekend' : ''}`;
+                
+                let abonoClass = '';
+                let abonoIndicatorHtml = '';
+                if (dayAbono) {
+                    if (dayAbono.photo) hasPhotos = true;
+                    if (dayAbono.abonoType === 'day') {
+                        abonoClass = ' abonado-dia';
+                        abonoIndicatorHtml = `<div class="day-row-abono-indicator dia">Abonado: ${dayAbono.reason}</div>`;
+                    } else if (dayAbono.abonoType === 'period') {
+                        abonoClass = ' abonado-periodo';
+                        abonoIndicatorHtml = `<div class="day-row-abono-indicator periodo">Abono: ${dayAbono.abonoStart}-${dayAbono.abonoEnd} (${dayAbono.reason})</div>`;
+                    }
+                }
+                
+                row.className = `day-row glass ${isWeekend ? 'weekend' : ''}${abonoClass}`;
 
                 // Renderização das informações do dia
                 let balanceHtml = '';
-                if (dayPunches.length > 0) {
+                if (dayPunches.length > 0 || dayAbono) {
                     const balanceClass = balanceMin > 0 ? 'positive' : (balanceMin < 0 ? 'negative' : 'zero');
                     const balanceSign = balanceMin > 0 ? '+' : '';
                     balanceHtml = `<span class="day-balance-text ${balanceClass}">${balanceSign}${formatMinutesToHoursText(balanceMin)}</span>`;
@@ -870,8 +1006,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <span class="date-day-week">${weekdayName}</span>
                         </div>
                         <div class="day-punches-summary">
-                            <span class="punches-list-text">${punchesText}</span>
-                            ${dayPunches.length > 0 ? `<span class="day-worked-time">Trabalhado: ${formatMinutesToHoursText(workedMin)}</span>` : ''}
+                            <span class="punches-list-text">${punchesText || (dayAbono && dayAbono.abonoType === 'day' ? 'Abono Integral' : '')}</span>
+                            ${dayPunches.length > 0 || (dayAbono && dayAbono.abonoType === 'period') ? `<span class="day-worked-time">Trabalhado: ${formatMinutesToHoursText(workedMin)}</span>` : ''}
+                            ${abonoIndicatorHtml}
                         </div>
                     </div>
                     <div class="day-row-right">
@@ -1008,11 +1145,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                         minute: '2-digit' 
                     });
 
+                    const isAbono = punch.isAbono;
+                    const labelStr = isAbono ? `Abono [${punch.reason}]` : timeStr;
+                    const altStr = isAbono ? `Dia ${day} - Abono [${punch.reason}]` : `Dia ${day} - Ponto ${timeStr}`;
+
                     const wrapper = document.createElement('div');
                     wrapper.className = 'album-photo-wrapper';
                     wrapper.innerHTML = `
-                        <img src="${punch.photo}" alt="Comprovante ${timeStr}">
-                        <div class="album-photo-time">${timeStr}</div>
+                        <img src="${punch.photo}" alt="${altStr}">
+                        <div class="album-photo-time" style="${isAbono ? 'font-size: 9px; line-height: 1.2; padding: 2px 4px; background: rgba(16, 185, 129, 0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;' : ''}">${labelStr}</div>
                     `;
 
                     wrapper.addEventListener('click', () => {
@@ -1318,6 +1459,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     function closePunchModal() {
         domPunchModal.classList.add('hidden');
         clearPunchPhotoSelection();
+        state.editingPunchId = null;
+        document.querySelector('#punch-modal h3').textContent = 'Registrar Novo Ponto';
+    }
+
+    function openEditPunchModal(punch) {
+        state.editingPunchId = punch.id;
+        state.currentPunchPhoto = punch.photo;
+        
+        // Atualiza título do modal
+        document.querySelector('#punch-modal h3').textContent = 'Editar Ponto';
+        
+        // Define data e hora no formato "YYYY-MM-DDTHH:MM" no fuso local
+        const date = new Date(punch.timestamp);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hour = String(date.getHours()).padStart(2, '0');
+        const minute = String(date.getMinutes()).padStart(2, '0');
+        domPunchDatetime.value = `${year}-${month}-${day}T${hour}:${minute}`;
+        
+        // Mostra foto se houver
+        if (punch.photo) {
+            domUploadPreviewImg.src = punch.photo;
+            domUploadPreviewInfo.textContent = "comprovante.jpg";
+            domUploadPreviewContainer.classList.remove('hidden');
+        } else {
+            clearPunchPhotoSelection();
+        }
+        
+        domPunchModal.classList.remove('hidden');
+    }
+
+    function showConfirmModal(title, message, onYes, onNo = null) {
+        domConfirmTitle.textContent = title;
+        domConfirmMessage.textContent = message;
+        domConfirmModal.classList.remove('hidden');
+        
+        // Remove listeners antigos clonando os botões
+        const newYes = domBtnConfirmYes.cloneNode(true);
+        const newNo = domBtnConfirmNo.cloneNode(true);
+        
+        domBtnConfirmYes.parentNode.replaceChild(newYes, domBtnConfirmYes);
+        domBtnConfirmNo.parentNode.replaceChild(newNo, domBtnConfirmNo);
+        
+        // Adiciona listeners aos novos botões
+        newYes.addEventListener('click', () => {
+            domConfirmModal.classList.add('hidden');
+            if (onYes) onYes();
+        });
+        
+        newNo.addEventListener('click', () => {
+            domConfirmModal.classList.add('hidden');
+            if (onNo) onNo();
+        });
     }
 
     // Funções de atalhos rápidos de horário
@@ -1437,9 +1632,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             deleted: false
         };
 
+        if (state.editingPunchId) {
+            newPunch.id = state.editingPunchId;
+        }
+
         try {
             await window.dbService.savePunch(newPunch);
-            showToast("Ponto registrado com sucesso!");
+            showToast(state.editingPunchId ? "Ponto atualizado com sucesso!" : "Ponto registrado com sucesso!");
             closePunchModal();
             
             // Atualiza tela corrente
@@ -1470,10 +1669,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             year: 'numeric'
         });
 
-        domLightboxTime.textContent = "Batida de ponto às " + dateObj.toLocaleTimeString('pt-BR', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        if (punch.isAbono) {
+            const abonoDesc = punch.abonoType === 'day' 
+                ? 'Abono Integral' 
+                : `Abono Período (${punch.abonoStart} - ${punch.abonoEnd})`;
+            domLightboxTime.textContent = `${abonoDesc} [${punch.reason}]`;
+        } else {
+            domLightboxTime.textContent = "Batida de ponto às " + dateObj.toLocaleTimeString('pt-BR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
 
         domLightboxModal.classList.remove('hidden');
     }
@@ -1508,6 +1714,134 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         return totalMinutes;
+    }
+
+    /**
+     * Calcula o tempo trabalhado, a jornada esperada e o saldo do dia considerando abonos.
+     */
+    function calculateDayWorkedAndExpected(dayPunches, dayAbono, standardJourney) {
+        if (dayAbono) {
+            if (dayAbono.abonoType === 'day') {
+                return {
+                    workedMinutes: 0,
+                    expectedJourney: 0,
+                    balance: 0
+                };
+            } else if (dayAbono.abonoType === 'period') {
+                const [sh, sm] = dayAbono.abonoStart.split(':').map(Number);
+                const abStartMin = sh * 60 + sm;
+                const [eh, em] = dayAbono.abonoEnd.split(':').map(Number);
+                const abEndMin = eh * 60 + em;
+                const abonoDuration = Math.max(0, abEndMin - abStartMin);
+                
+                const expectedJourney = Math.max(0, standardJourney - abonoDuration);
+                
+                // Calcula as horas trabalhadas descontando as faixas coincidentes com o abono
+                let workedMinutes = 0;
+                const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                for (let i = 0; i < sorted.length - 1; i += 2) {
+                    const start = new Date(sorted[i].timestamp);
+                    const end = new Date(sorted[i+1].timestamp);
+                    
+                    const wStartMin = start.getHours() * 60 + start.getMinutes();
+                    const wEndMin = end.getHours() * 60 + end.getMinutes();
+                    
+                    const duration = wEndMin - wStartMin;
+                    if (duration > 0) {
+                        const overlapStart = Math.max(wStartMin, abStartMin);
+                        const overlapEnd = Math.min(wEndMin, abEndMin);
+                        const overlap = Math.max(0, overlapEnd - overlapStart);
+                        workedMinutes += (duration - overlap);
+                    }
+                }
+                
+                return {
+                    workedMinutes,
+                    expectedJourney,
+                    balance: workedMinutes - expectedJourney
+                };
+            }
+        }
+        
+        // Sem abono
+        const workedMinutes = calculateWorkedMinutes(dayPunches);
+        return {
+            workedMinutes,
+            expectedJourney: standardJourney,
+            balance: workedMinutes - standardJourney
+        };
+    }
+
+    /**
+     * Calcula o saldo simulado em segundos considerando abonos.
+     */
+    function calculateSimulatedSeconds(todayPunches, todayAbono, journeyMinutes) {
+        const now = new Date();
+        const simulatedPunches = [...todayPunches];
+        if (todayPunches.length % 2 !== 0) {
+            simulatedPunches.push({ timestamp: now.toISOString() });
+        }
+        
+        let expectedSeconds = journeyMinutes * 60;
+        let workedSeconds = 0;
+        
+        if (todayAbono) {
+            if (todayAbono.abonoType === 'day') {
+                return {
+                    workedSeconds: 0,
+                    expectedSeconds: 0,
+                    balanceSeconds: 0
+                };
+            } else if (todayAbono.abonoType === 'period') {
+                const [sh, sm] = todayAbono.abonoStart.split(':').map(Number);
+                const abStartSec = (sh * 60 + sm) * 60;
+                const [eh, em] = todayAbono.abonoEnd.split(':').map(Number);
+                const abEndSec = (eh * 60 + em) * 60;
+                const abonoDurationSec = Math.max(0, abEndSec - abStartSec);
+                
+                expectedSeconds = Math.max(0, (journeyMinutes * 60) - abonoDurationSec);
+                
+                const sorted = [...simulatedPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                for (let i = 0; i < sorted.length - 1; i += 2) {
+                    const start = new Date(sorted[i].timestamp);
+                    const end = new Date(sorted[i+1].timestamp);
+                    
+                    const wStartSec = (start.getHours() * 3600) + (start.getMinutes() * 60) + start.getSeconds();
+                    const wEndSec = (end.getHours() * 3600) + (end.getMinutes() * 60) + end.getSeconds();
+                    
+                    const duration = wEndSec - wStartSec;
+                    if (duration > 0) {
+                        const overlapStart = Math.max(wStartSec, abStartSec);
+                        const overlapEnd = Math.min(wEndSec, abEndSec);
+                        const overlap = Math.max(0, overlapEnd - overlapStart);
+                        workedSeconds += (duration - overlap);
+                    }
+                }
+                
+                return {
+                    workedSeconds,
+                    expectedSeconds,
+                    balanceSeconds: workedSeconds - expectedSeconds
+                };
+            }
+        }
+        
+        // Sem abono
+        const sorted = [...simulatedPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        for (let i = 0; i < sorted.length - 1; i += 2) {
+            const start = new Date(sorted[i].timestamp);
+            const end = new Date(sorted[i+1].timestamp);
+            const diffMs = end - start;
+            if (diffMs > 0) {
+                workedSeconds += Math.floor(diffMs / 1000);
+            }
+        }
+        
+        return {
+            workedSeconds,
+            expectedSeconds,
+            balanceSeconds: workedSeconds - expectedSeconds
+        };
     }
 
     /**
@@ -1853,7 +2187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    function openEditDayModal(dateObj, punches) {
+    async function openEditDayModal(dateObj, punches) {
         state.editingDate = dateObj;
         state.editingPunches = punches.map(p => ({
             id: p.id,
@@ -1870,6 +2204,77 @@ document.addEventListener('DOMContentLoaded', async () => {
             year: 'numeric' 
         });
         domEditModalDateLabel.textContent = dateFormatted;
+        
+        const dateStr = dateObj.toLocaleDateString('pt-BR');
+        
+        // Carrega abono do dia
+        const username = state.currentUser.username;
+        const allPunchesRaw = await window.dbService.getPunches(username);
+        const dayAbono = allPunchesRaw.find(p => p.isAbono && !p.deleted && new Date(p.timestamp).toLocaleDateString('pt-BR') === dateStr);
+        
+        let abonoContainer = document.getElementById('edit-abono-status-container');
+        if (!abonoContainer) {
+            abonoContainer = document.createElement('div');
+            abonoContainer.id = 'edit-abono-status-container';
+            domEditPunchesContainer.parentNode.insertBefore(abonoContainer, domEditPunchesContainer);
+        }
+        
+        if (dayAbono) {
+            const desc = dayAbono.abonoType === 'day' 
+                ? 'Dia Inteiro' 
+                : `Período (${dayAbono.abonoStart} - ${dayAbono.abonoEnd})`;
+            abonoContainer.innerHTML = `
+                <div class="edit-abono-section" style="margin-bottom: 16px; padding: 12px; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span class="badge-abono ${dayAbono.abonoType === 'period' ? 'period' : ''}">${desc}</span>
+                            <div style="font-size: 13px; font-weight: 600; margin-top: 4px; color: var(--text-primary);">${dayAbono.reason}</div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="btn btn-outline btn-small" id="btn-edit-day-abono" style="padding: 6px 10px; font-size: 11px;">Editar</button>
+                            <button type="button" class="btn btn-danger btn-small" id="btn-delete-day-abono" style="padding: 6px 10px; font-size: 11px;">Remover</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('btn-edit-day-abono').addEventListener('click', () => {
+                closeEditDayModal();
+                openAbonoModal(dayAbono);
+            });
+            
+            document.getElementById('btn-delete-day-abono').addEventListener('click', () => {
+                showConfirmModal("Remover Abono", "Deseja realmente remover o abono deste dia?", async () => {
+                    try {
+                        await window.dbService.deletePunch(dayAbono.id);
+                        showToast("Abono removido com sucesso.");
+                        closeEditDayModal();
+                        renderActiveView();
+                        window.syncService.triggerAutoSync();
+                    } catch (err) {
+                        showToast("Erro ao remover abono: " + err);
+                    }
+                });
+            });
+        } else {
+            abonoContainer.innerHTML = `
+                <div class="edit-abono-section" style="margin-bottom: 16px; padding: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--text-secondary);">Sem abono registrado para este dia.</span>
+                    <button type="button" class="btn btn-outline-success btn-small" id="btn-add-day-abono" style="padding: 6px 10px; font-size: 11px;">+ Add Abono</button>
+                </div>
+            `;
+            
+            document.getElementById('btn-add-day-abono').addEventListener('click', () => {
+                closeEditDayModal();
+                openAbonoModal(null);
+                
+                // Define a data no modal de abono para o dia selecionado
+                const y = dateObj.getFullYear();
+                const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const d = String(dateObj.getDate()).padStart(2, '0');
+                domAbonoDate.value = `${y}-${m}-${d}`;
+            });
+        }
         
         renderEditingPunches();
         domEditPunchesContainer.scrollTop = 0;
@@ -2087,6 +2492,596 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (err) {
             console.error("Erro ao salvar edições do dia:", err);
             showToast("Erro ao salvar alterações: " + err);
+        }
+    });
+
+    // ==========================================================================
+    // SEÇÃO DE GESTÃO DE ABONOS
+    // ==========================================================================
+
+    // Controles de alteração de mês de abonos
+    domAbonosPrevMonth.addEventListener('click', () => {
+        state.abonosMonth.setMonth(state.abonosMonth.getMonth() - 1);
+        renderAbonos();
+    });
+
+    domAbonosNextMonth.addEventListener('click', () => {
+        state.abonosMonth.setMonth(state.abonosMonth.getMonth() + 1);
+        renderAbonos();
+    });
+
+    // Abrir modal de novo abono
+    domBtnAddAbonoTrigger.addEventListener('click', () => {
+        openAbonoModal(null);
+    });
+
+    domBtnCloseAbonoModal.addEventListener('click', closeAbonoModal);
+    domBtnCancelAbono.addEventListener('click', closeAbonoModal);
+
+    // Alternar campos de período
+    domAbonoType.addEventListener('change', () => {
+        if (domAbonoType.value === 'period') {
+            domAbonoPeriodFields.classList.remove('hidden');
+        } else {
+            domAbonoPeriodFields.classList.add('hidden');
+        }
+    });
+
+    // Upload de comprovante de abono
+    domAbonoImageUploadTrigger.addEventListener('click', (e) => {
+        if (e.target.closest('#btn-abono-remove-photo') || e.target.closest('#btn-crop-photo-abono')) return;
+        domAbonoCameraInput.click();
+    });
+
+    domBtnAbonoTriggerCamera.addEventListener('click', () => domAbonoCameraInput.click());
+    domBtnAbonoTriggerGallery.addEventListener('click', () => domAbonoPhotoInput.click());
+
+    domAbonoPhotoInput.addEventListener('change', handleAbonoFileSelection);
+    domAbonoCameraInput.addEventListener('change', handleAbonoFileSelection);
+
+    async function handleAbonoFileSelection(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        showToast("Processando foto...");
+        try {
+            const base64Data = await window.cameraService.resizeAndCompress(file, 800, 800, 0.7);
+            state.currentAbonoPhoto = base64Data;
+            domAbonoUploadPreviewImg.src = base64Data;
+            const sizeKB = Math.round((base64Data.length * 3) / 4 / 1024);
+            domAbonoUploadPreviewInfo.textContent = `Atestado - ~${sizeKB}KB`;
+            domAbonoUploadPlaceholder.classList.add('hidden');
+            domAbonoUploadPreviewContainer.classList.remove('hidden');
+            showToast("Atestado anexado com sucesso!");
+        } catch (err) {
+            console.error("Erro ao comprimir imagem:", err);
+            showToast("Erro ao processar imagem: " + err);
+            clearAbonoPhotoSelection();
+        }
+    }
+
+    domBtnAbonoRemovePhoto.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearAbonoPhotoSelection();
+    });
+
+    function clearAbonoPhotoSelection() {
+        state.currentAbonoPhoto = null;
+        domAbonoPhotoInput.value = '';
+        domAbonoCameraInput.value = '';
+        domAbonoUploadPreviewContainer.classList.add('hidden');
+        domAbonoUploadPreviewImg.src = '';
+        domAbonoUploadPlaceholder.classList.remove('hidden');
+    }
+
+    // Recortar foto do abono
+    domBtnCropPhotoAbono.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.currentAbonoPhoto) {
+            openCropModal(state.currentAbonoPhoto, (croppedBase64) => {
+                state.currentAbonoPhoto = croppedBase64;
+                domAbonoUploadPreviewImg.src = croppedBase64;
+                const sizeKB = Math.round((croppedBase64.length * 3) / 4 / 1024);
+                domAbonoUploadPreviewInfo.textContent = `Atestado (recortado) - ~${sizeKB}KB`;
+                showToast("Foto recortada com sucesso!");
+            });
+        }
+    });
+
+    // Salvar Abono
+    domAbonoForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const dateStr = domAbonoDate.value;
+        const reason = domAbonoReason.value;
+        const type = domAbonoType.value;
+        const startTime = domAbonoStartTime.value;
+        const endTime = domAbonoEndTime.value;
+
+        if (!dateStr || !reason) {
+            showToast("Preencha a data e o motivo.");
+            return;
+        }
+
+        // Criar objeto Date no meio do dia para evitar problemas de fuso
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const dateObj = new Date(year, month - 1, day, 12, 0, 0);
+
+        const id = domAbonoId.value || 'abono_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+
+        const cleanAbono = {
+            id: id,
+            username: state.currentUser.username,
+            timestamp: dateObj.toISOString(),
+            isAbono: true,
+            abonoType: type,
+            abonoStart: type === 'period' ? startTime : null,
+            abonoEnd: type === 'period' ? endTime : null,
+            reason: reason,
+            photo: state.currentAbonoPhoto,
+            synced: false,
+            deleted: false
+        };
+
+        try {
+            await window.dbService.savePunch(cleanAbono);
+            showToast(domAbonoId.value ? "Abono atualizado com sucesso!" : "Abono gravado com sucesso!");
+            closeAbonoModal();
+            renderAbonos();
+            window.syncService.triggerAutoSync();
+        } catch (err) {
+            showToast("Erro ao gravar abono: " + err);
+        }
+    });
+
+    function openAbonoModal(abono = null) {
+        if (!abono) {
+            domAbonoModalTitle.textContent = "Lançar Novo Abono";
+            domAbonoId.value = '';
+            domAbonoForm.reset();
+            
+            // Prefill data com hoje
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            domAbonoDate.value = `${y}-${m}-${d}`;
+            
+            domAbonoType.value = 'day';
+            domAbonoPeriodFields.classList.add('hidden');
+            clearAbonoPhotoSelection();
+        } else {
+            domAbonoModalTitle.textContent = "Editar Abono";
+            domAbonoId.value = abono.id;
+            domAbonoReason.value = abono.reason;
+            
+            const date = new Date(abono.timestamp);
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            domAbonoDate.value = `${y}-${m}-${d}`;
+            
+            domAbonoType.value = abono.abonoType;
+            if (abono.abonoType === 'period') {
+                domAbonoPeriodFields.classList.remove('hidden');
+                domAbonoStartTime.value = abono.abonoStart || '13:00';
+                domAbonoEndTime.value = abono.abonoEnd || '17:00';
+            } else {
+                domAbonoPeriodFields.classList.add('hidden');
+            }
+            
+            if (abono.photo) {
+                state.currentAbonoPhoto = abono.photo;
+                domAbonoUploadPreviewImg.src = abono.photo;
+                const sizeKB = Math.round((abono.photo.length * 3) / 4 / 1024);
+                domAbonoUploadPreviewInfo.textContent = `Atestado - ~${sizeKB}KB`;
+                domAbonoUploadPlaceholder.classList.add('hidden');
+                domAbonoUploadPreviewContainer.classList.remove('hidden');
+            } else {
+                clearAbonoPhotoSelection();
+            }
+        }
+        domAbonoModal.classList.remove('hidden');
+    }
+
+    function closeAbonoModal() {
+        domAbonoModal.classList.add('hidden');
+        clearAbonoPhotoSelection();
+    }
+
+    async function renderAbonos() {
+        const username = state.currentUser.username;
+        const year = state.abonosMonth.getFullYear();
+        const month = state.abonosMonth.getMonth();
+
+        domAbonosMonthLabel.textContent = state.abonosMonth.toLocaleDateString('pt-BR', { 
+            month: 'long', 
+            year: 'numeric' 
+        });
+
+        try {
+            const allPunchesRaw = await window.dbService.getPunches(username);
+            const abonos = allPunchesRaw.filter(p => p.isAbono && !p.deleted);
+            
+            // Filtrar abonos do mês
+            const monthAbonos = abonos.filter(a => {
+                const date = new Date(a.timestamp);
+                return date.getFullYear() === year && date.getMonth() === month;
+            });
+
+            domAbonosListContainer.innerHTML = '';
+
+            if (monthAbonos.length === 0) {
+                domAbonosListContainer.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">
+                            <svg viewBox="0 0 24 24" width="36" height="36" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                        </div>
+                        <p>Nenhum abono registrado neste mês.</p>
+                        <span>Clique em "Novo Abono" para cadastrar.</span>
+                    </div>
+                `;
+                return;
+            }
+
+            monthAbonos.forEach(a => {
+                const date = new Date(a.timestamp);
+                const day = String(date.getDate()).padStart(2, '0');
+                const weekday = date.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+                const photoHtml = a.photo ? `<img src="${a.photo}" class="abono-photo-thumb" data-id="${a.id}" alt="Atestado">` : '';
+                const typeBadge = a.abonoType === 'day' 
+                    ? `<span class="badge-abono">Dia Inteiro</span>` 
+                    : `<span class="badge-abono period">Período (${a.abonoStart} - ${a.abonoEnd})</span>`;
+                
+                const card = document.createElement('div');
+                card.className = 'abono-card glass';
+                card.innerHTML = `
+                    <div class="abono-info-left">
+                        <div class="abono-date-badge">
+                            <span class="abono-date-day">${day}</span>
+                            <span class="abono-date-month">${weekday}</span>
+                        </div>
+                        <div class="abono-details">
+                            <span class="abono-reason-title">${a.reason}</span>
+                            <span class="abono-type-desc">${typeBadge}</span>
+                        </div>
+                    </div>
+                    <div class="abono-card-right">
+                        ${photoHtml}
+                        <div class="punch-actions-menu">
+                            <button class="btn-actions-punch" data-id="${a.id}" title="Ações">
+                                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+                            </button>
+                            <div class="punch-actions-dropdown" id="dropdown-${a.id}">
+                                <button type="button" class="punch-actions-item edit-abono" data-id="${a.id}">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path></svg>
+                                    Editar
+                                </button>
+                                <button type="button" class="punch-actions-item delete-abono" data-id="${a.id}">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2 2v2"></path></svg>
+                                    Excluir
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                domAbonosListContainer.appendChild(card);
+            });
+
+            // Registrar cliques nas miniaturas para lightbox
+            domAbonosListContainer.querySelectorAll('.abono-photo-thumb').forEach(thumb => {
+                thumb.addEventListener('click', () => {
+                    const id = thumb.getAttribute('data-id');
+                    const abono = monthAbonos.find(x => x.id === id);
+                    if (abono) {
+                        domLightboxImg.src = abono.photo;
+                        domLightboxDate.textContent = new Date(abono.timestamp).toLocaleDateString('pt-BR', {
+                            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+                        });
+                        domLightboxTime.textContent = `Abono (${abono.reason})`;
+                        domLightboxModal.classList.remove('hidden');
+                    }
+                });
+            });
+
+            // Registrar cliques de ações (toggle dropdown)
+            domAbonosListContainer.querySelectorAll('.btn-actions-punch').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-id');
+                    const dropdown = document.getElementById(`dropdown-${id}`);
+                    
+                    document.querySelectorAll('.punch-actions-dropdown').forEach(d => {
+                        if (d !== dropdown) d.classList.remove('show');
+                    });
+                    dropdown.classList.toggle('show');
+                });
+            });
+
+            // Registrar clique em editar abono
+            domAbonosListContainer.querySelectorAll('.punch-actions-item.edit-abono').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-id');
+                    const abono = monthAbonos.find(x => x.id === id);
+                    if (abono) openAbonoModal(abono);
+                });
+            });
+
+            // Registrar clique em excluir abono
+            domAbonosListContainer.querySelectorAll('.punch-actions-item.delete-abono').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.getAttribute('data-id');
+                    showConfirmModal("Excluir Abono", "Deseja realmente excluir este abono?", async () => {
+                        try {
+                            await window.dbService.deletePunch(id);
+                            showToast("Abono removido com sucesso.");
+                            renderAbonos();
+                            window.syncService.triggerAutoSync();
+                        } catch (err) {
+                            showToast("Erro ao excluir abono: " + err);
+                        }
+                    });
+                });
+            });
+
+        } catch (err) {
+            console.error("Erro ao renderizar abonos:", err);
+            showToast("Erro ao carregar abonos.");
+        }
+    }
+
+    // Ação de Exportar PDF de Comprovantes (Colmeia)
+    domBtnExportPdf.addEventListener('click', async () => {
+        if (!state.currentUser) return;
+        
+        showToast("Gerando relatório de comprovantes...");
+        
+        const username = state.currentUser.username;
+        const year = state.selectedMonth.getFullYear();
+        const month = state.selectedMonth.getMonth();
+        
+        try {
+            const allPunchesRaw = await window.dbService.getPunches(username);
+            
+            // Filtra batidas e abonos deste mês que contenham foto e não estejam excluídos
+            const photosList = allPunchesRaw.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && p.photo && !p.deleted;
+            });
+            
+            if (photosList.length === 0) {
+                showToast("Nenhum comprovante com foto este mês para exportar.");
+                return;
+            }
+            
+            // Ordena cronologicamente
+            photosList.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            // Filtra separadamente os punches regulares para fins de numeração (Entrada 1, Saída 1 etc.)
+            const monthPunches = allPunchesRaw.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && !p.isAbono && !p.deleted;
+            });
+            
+            const monthName = state.selectedMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+            
+            const cardsHtml = photosList.map(punch => {
+                const punchDate = new Date(punch.timestamp);
+                const dayNum = String(punchDate.getDate()).padStart(2, '0');
+                
+                let cardClass = 'card';
+                let label = '';
+                let sublabel = '';
+                
+                if (punch.isAbono) {
+                    cardClass += ' abono';
+                    label = `Abono [${punch.reason}]`;
+                    const abonoTime = punch.abonoType === 'day' ? 'Dia Inteiro' : `${punch.abonoStart} - ${punch.abonoEnd}`;
+                    sublabel = `Dia ${dayNum} (${abonoTime})`;
+                } else {
+                    // Descobre a ordem das batidas do dia correspondente para rotular corretamente
+                    const dayPunches = monthPunches.filter(p => new Date(p.timestamp).getDate() === punchDate.getDate());
+                    dayPunches.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    const index = dayPunches.findIndex(p => p.id === punch.id);
+                    const isEntry = index % 2 === 0;
+                    const punchLabel = `${isEntry ? 'Entrada' : 'Saída'} ${Math.floor(index / 2) + 1}`;
+                    
+                    label = punchLabel;
+                    const timeStr = punchDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    sublabel = `Dia ${dayNum} às ${timeStr}`;
+                }
+                
+                return `
+                    <div class="${cardClass}">
+                        <div class="photo-container">
+                            <img src="${punch.photo}" alt="${label}">
+                        </div>
+                        <div class="card-label" title="${label}">${label}</div>
+                        <div class="card-sublabel">${sublabel}</div>
+                    </div>
+                `;
+            }).join('\n');
+            
+            // Abre nova aba e renderiza o HTML otimizado para impressão
+            const printWindow = window.open('', '_blank');
+            if (!printWindow) {
+                showToast("Erro ao abrir janela de impressão. Verifique se o bloqueador de pop-ups está ativado.");
+                return;
+            }
+            
+            const fullHtml = `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <title>Comprovantes de Ponto - ${state.currentUser.name} - ${monthName}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        @page {
+            size: A4 portrait;
+            margin: 12mm 12mm 15mm 12mm;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #1e293b;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 0;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        
+        .header {
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+            margin-bottom: 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        
+        .header-left h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin: 0 0 4px 0;
+            color: #0f172a;
+        }
+        
+        .header-left p {
+            margin: 0;
+            color: #64748b;
+            font-size: 11px;
+        }
+        
+        .header-right {
+            text-align: right;
+            font-size: 10px;
+            color: #64748b;
+        }
+        
+        .header-right p {
+            margin: 0 0 2px 0;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+        }
+        
+        .card {
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 5px;
+            background-color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            box-sizing: border-box;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        
+        .photo-container {
+            width: 100%;
+            height: 130px;
+            overflow: hidden;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            background-color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .photo-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .card-label {
+            font-size: 9px;
+            font-weight: 700;
+            margin-top: 5px;
+            color: #0f172a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+        }
+        
+        .card-sublabel {
+            font-size: 8px;
+            color: #64748b;
+            margin-top: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+        }
+        
+        .card.abono {
+            border-color: #a7f3d0;
+            background-color: #ecfdf5;
+        }
+        
+        .card.abono .card-label {
+            color: #047857;
+        }
+        
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 6px;
+            background-color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>Coleção de Comprovantes</h1>
+            <p>Colaborador: <strong>${state.currentUser.name}</strong> (@${state.currentUser.username}) | Empresa: <strong>${state.currentUser.company}</strong></p>
+        </div>
+        <div class="header-right">
+            <p>Período: <strong>${monthName}</strong></p>
+            <p>Emitido em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+        </div>
+    </div>
+    
+    <div class="grid">
+        ${cardsHtml}
+    </div>
+    
+    <div class="footer">
+        Controle de Ponto Pessoal • Gerado dinamicamente
+    </div>
+</body>
+</html>
+            `;
+            
+            printWindow.document.write(fullHtml);
+            printWindow.document.close();
+            
+            // Aguarda o processamento inicial e inicia diálogo de impressão
+            setTimeout(() => {
+                printWindow.print();
+            }, 500);
+            
+        } catch (err) {
+            console.error("Erro ao gerar PDF:", err);
+            showToast("Falha ao exportar PDF.");
         }
     });
 });
