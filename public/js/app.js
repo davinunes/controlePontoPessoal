@@ -3029,7 +3029,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         .card {
-            width: 105px;
+            width: 132px;
             border: 1px solid #cbd5e1;
             border-radius: 6px;
             padding: 5px;
@@ -3043,7 +3043,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         .photo-container {
             width: 100%;
-            height: 125px;
+            height: 160px;
             overflow: hidden;
             border-radius: 4px;
             border: 1px solid #e2e8f0;
