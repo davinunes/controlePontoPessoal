@@ -2243,7 +2243,18 @@ h1, h2, h3, h4, .current-month-display {
     color: var(--text-primary);
 }
 
-/* Estilos de Impressão de Comprovantes (Colmeia) */
+/* Elevando o z-index do card ativo que possui um dropdown de ações aberto */
+.punch-card:has(.punch-actions-dropdown.show),
+.abono-card:has(.punch-actions-dropdown.show) {
+    position: relative;
+    z-index: 150 !important;
+}
+
+.punch-actions-dropdown {
+    z-index: 200 !important;
+}
+
+/* Estilos de Impressão de Comprovantes */
 @media print {
     body {
         background: #fff !important;

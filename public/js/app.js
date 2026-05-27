@@ -2864,41 +2864,73 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return d.getFullYear() === year && d.getMonth() === month && !p.isAbono && !p.deleted;
             });
             
+            // Agrupa as fotos por dia
+            const photosByDay = {};
+            photosList.forEach(punch => {
+                const date = new Date(punch.timestamp);
+                const dayNum = date.getDate();
+                if (!photosByDay[dayNum]) photosByDay[dayNum] = [];
+                photosByDay[dayNum].push(punch);
+            });
+            
+            // Ordena os dias
+            const daysWithPhotos = Object.keys(photosByDay).map(Number).sort((a, b) => a - b);
+            
             const monthName = state.selectedMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
             
-            const cardsHtml = photosList.map(punch => {
-                const punchDate = new Date(punch.timestamp);
-                const dayNum = String(punchDate.getDate()).padStart(2, '0');
+            const rowsHtml = daysWithPhotos.map(day => {
+                const dayPunchesWithPhotos = photosByDay[day];
+                // Ordena cronologicamente dentro do dia
+                dayPunchesWithPhotos.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
                 
-                let cardClass = 'card';
-                let label = '';
-                let sublabel = '';
+                const dateObj = new Date(year, month, day);
+                const weekdayName = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+                const dayLabelStr = `Dia ${String(day).padStart(2, '0')} (${weekdayName})`;
                 
-                if (punch.isAbono) {
-                    cardClass += ' abono';
-                    label = `Abono [${punch.reason}]`;
-                    const abonoTime = punch.abonoType === 'day' ? 'Dia Inteiro' : `${punch.abonoStart} - ${punch.abonoEnd}`;
-                    sublabel = `Dia ${dayNum} (${abonoTime})`;
-                } else {
-                    // Descobre a ordem das batidas do dia correspondente para rotular corretamente
-                    const dayPunches = monthPunches.filter(p => new Date(p.timestamp).getDate() === punchDate.getDate());
-                    dayPunches.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-                    const index = dayPunches.findIndex(p => p.id === punch.id);
-                    const isEntry = index % 2 === 0;
-                    const punchLabel = `${isEntry ? 'Entrada' : 'Saída'} ${Math.floor(index / 2) + 1}`;
+                const cardsHtml = dayPunchesWithPhotos.map(punch => {
+                    const punchDate = new Date(punch.timestamp);
                     
-                    label = punchLabel;
-                    const timeStr = punchDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                    sublabel = `Dia ${dayNum} às ${timeStr}`;
-                }
+                    let cardClass = 'card';
+                    let label = '';
+                    let sublabel = '';
+                    
+                    if (punch.isAbono) {
+                        cardClass += ' abono';
+                        label = `Abono: ${punch.reason}`;
+                        const abonoTime = punch.abonoType === 'day' ? 'Dia Inteiro' : `${punch.abonoStart} - ${punch.abonoEnd}`;
+                        sublabel = abonoTime;
+                    } else {
+                        // Descobre a ordem das batidas do dia correspondente para rotular corretamente
+                        const dayPunches = monthPunches.filter(p => new Date(p.timestamp).getDate() === day);
+                        dayPunches.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                        const index = dayPunches.findIndex(p => p.id === punch.id);
+                        const isEntry = index % 2 === 0;
+                        const punchLabel = `${isEntry ? 'Entrada' : 'Saída'} ${Math.floor(index / 2) + 1}`;
+                        
+                        label = punchLabel;
+                        const timeStr = punchDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        sublabel = timeStr;
+                    }
+                    
+                    return `
+                        <div class="${cardClass}">
+                            <div class="photo-container">
+                                <img src="${punch.photo}" alt="${label}">
+                            </div>
+                            <div class="card-label" title="${label}">${label}</div>
+                            <div class="card-sublabel">${sublabel}</div>
+                        </div>
+                    `;
+                }).join('\n');
                 
                 return `
-                    <div class="${cardClass}">
-                        <div class="photo-container">
-                            <img src="${punch.photo}" alt="${label}">
+                    <div class="day-row-print">
+                        <div class="day-header-print">
+                            <span class="day-label-print">${dayLabelStr}</span>
                         </div>
-                        <div class="card-label" title="${label}">${label}</div>
-                        <div class="card-sublabel">${sublabel}</div>
+                        <div class="day-cards-print">
+                            ${cardsHtml}
+                        </div>
                     </div>
                 `;
             }).join('\n');
@@ -2966,13 +2998,38 @@ document.addEventListener('DOMContentLoaded', async () => {
             margin: 0 0 2px 0;
         }
         
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
+        .day-row-print {
+            display: flex;
+            gap: 16px;
+            border-bottom: 1px dashed #cbd5e1;
+            padding: 12px 0;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        
+        .day-row-print:last-child {
+            border-bottom: none;
+        }
+        
+        .day-header-print {
+            width: 80px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            font-weight: 700;
+            font-size: 12px;
+            color: #0f172a;
+        }
+        
+        .day-cards-print {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            flex: 1;
         }
         
         .card {
+            width: 105px;
             border: 1px solid #cbd5e1;
             border-radius: 6px;
             padding: 5px;
@@ -2982,13 +3039,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             align-items: center;
             text-align: center;
             box-sizing: border-box;
-            page-break-inside: avoid;
-            break-inside: avoid;
         }
         
         .photo-container {
             width: 100%;
-            height: 130px;
+            height: 125px;
             overflow: hidden;
             border-radius: 4px;
             border: 1px solid #e2e8f0;
@@ -2999,9 +3054,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         
         .photo-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
         }
         
         .card-label {
@@ -3060,8 +3117,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
     </div>
     
-    <div class="grid">
-        ${cardsHtml}
+    <div class="rows-container">
+        ${rowsHtml}
     </div>
     
     <div class="footer">
