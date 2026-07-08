@@ -3,6 +3,30 @@
  * Monitora o estado da rede e sincroniza dados locais do IndexedDB com o servidor.
  */
 
+function calculateMonthHash(punches) {
+    if (!Array.isArray(punches)) return '';
+    const activePunches = punches.filter(p => p && !p.deleted);
+    const sorted = [...activePunches].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    const representation = sorted.map(p => ({
+        id: p.id,
+        timestamp: p.timestamp,
+        isAbono: !!p.isAbono,
+        abonoType: p.abonoType || null,
+        abonoStart: p.abonoStart || null,
+        abonoEnd: p.abonoEnd || null,
+        reason: p.reason || null,
+        photoHash: p.photo ? p.photo.length + '_' + p.photo.substring(Math.max(0, p.photo.length - 20)) : 'none',
+        deleted: !!p.deleted,
+        updatedAt: p.updatedAt || ''
+    }));
+    const str = JSON.stringify(representation);
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash * 33) ^ str.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(16);
+}
+
 class SyncService {
     constructor() {
         // Se rodar pelo file://, aponta para localhost:3000. Se rodar em um servidor, usa a mesma origem.
@@ -102,10 +126,37 @@ class SyncService {
             // 1. Busca todos os pontos locais que não foram sincronizados
             const unsyncedPunches = await window.dbService.getUnsyncedPunches(username);
 
+            // Carrega todos os pontos locais ativos para calcular hashes locais no IndexedDB
+            const allLocalPunches = await window.dbService.getPunches(username);
+            const localHashes = {};
+            const grouped = {};
+            
+            allLocalPunches.forEach(punch => {
+                if (!punch) return;
+                const date = new Date(punch.timestamp);
+                let year = date.getFullYear();
+                let month = String(date.getMonth() + 1).padStart(2, '0');
+                if (isNaN(year)) {
+                    const now = new Date();
+                    year = now.getFullYear();
+                    month = String(now.getMonth() + 1).padStart(2, '0');
+                }
+                const key = `${year}_${month}`;
+                if (!grouped[key]) {
+                    grouped[key] = [];
+                }
+                grouped[key].push(punch);
+            });
+
+            for (const [key, list] of Object.entries(grouped)) {
+                localHashes[key] = calculateMonthHash(list);
+            }
+
             // 2. Monta o payload de sincronização
             const payload = {
                 username: username.toLowerCase(),
-                punches: unsyncedPunches
+                punches: unsyncedPunches,
+                hashes: localHashes
             };
 
             // 3. Envia os dados para a API do Servidor
@@ -131,6 +182,11 @@ class SyncService {
                 // (O merge já faz isso, mas garantimos para os IDs enviados)
                 const sentIds = unsyncedPunches.map(p => p.id);
                 await window.dbService.markPunchesAsSynced(sentIds);
+
+                // Salva as hashes recebidas do servidor no localStorage para referência
+                if (data.hashes) {
+                    localStorage.setItem(`monthHashes_${username.toLowerCase()}`, JSON.stringify(data.hashes));
+                }
 
                 console.log("Sincronização realizada com sucesso!");
                 this.isSyncing = false;

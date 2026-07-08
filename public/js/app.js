@@ -138,6 +138,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const domBtnCropPresets = document.querySelectorAll('.btn-crop-preset');
     const domBtnCancelCrop = document.getElementById('btn-cancel-crop');
     const domBtnConfirmCrop = document.getElementById('btn-confirm-crop');
+    const domBtnRotateLeft = document.getElementById('btn-rotate-left');
+    const domBtnRotateRight = document.getElementById('btn-rotate-right');
     const domBtnCropPhotoNew = document.getElementById('btn-crop-photo-new');
 
     // Referências - Configurações Câmera
@@ -163,6 +165,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const domAbonoPeriodFields = document.getElementById('abono-period-fields');
     const domAbonoStartTime = document.getElementById('abono-start-time');
     const domAbonoEndTime = document.getElementById('abono-end-time');
+    const domAbonoRecurrenceGroup = document.getElementById('abono-recurrence-group');
+    const domAbonoRecurrence = document.getElementById('abono-recurrence');
+    const domAbonoRecurrenceEndGroup = document.getElementById('abono-recurrence-end-group');
+    const domAbonoRecurrenceEnd = document.getElementById('abono-recurrence-end');
     const domAbonoPhotoInput = document.getElementById('abono-photo-input');
     const domAbonoCameraInput = document.getElementById('abono-camera-input');
     const domAbonoImageUploadTrigger = document.getElementById('abono-image-upload-trigger');
@@ -740,15 +746,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const currentYear = now.getFullYear();
         const currentMonth = now.getMonth(); // 0-indexed
 
-        // Filtra todos os pontos do mês atual
-        const monthPunches = allPunches.filter(p => {
-            const pDate = new Date(p.timestamp);
-            return pDate.getFullYear() === currentYear && pDate.getMonth() === currentMonth;
-        });
-
-        // Agrupa pontos por dia local
+        // Agrupar todos os pontos por dia local (geral, de todo o histórico)
         const punchesByDay = new Map();
-        monthPunches.forEach(p => {
+        allPunches.forEach(p => {
+            if (!p) return;
             const pDateStr = new Date(p.timestamp).toLocaleDateString('pt-BR');
             if (!punchesByDay.has(pDateStr)) {
                 punchesByDay.set(pDateStr, []);
@@ -756,23 +757,39 @@ document.addEventListener('DOMContentLoaded', async () => {
             punchesByDay.get(pDateStr).push(p);
         });
 
-        let totalBalance = 0;
-        let totalWorked = 0;
-        let totalExpected = 0;
+        // Agrupar abonos por dia local
+        const abonosByDay = new Map();
+        allAbonos.forEach(a => {
+            if (!a) return;
+            const aDateStr = new Date(a.timestamp).toLocaleDateString('pt-BR');
+            abonosByDay.set(aDateStr, a);
+        });
 
-        punchesByDay.forEach((dayPunches, dayDateStr) => {
-            // Ordena cronologicamente
+        // Encontrar todos os dias únicos com ponto ou abono
+        const allDays = new Set([...punchesByDay.keys(), ...abonosByDay.keys()]);
+
+        let totalBalance = 0;
+        let monthWorked = 0;
+        let monthExpected = 0;
+
+        allDays.forEach(dayDateStr => {
+            const [d, m, y] = dayDateStr.split('/').map(Number);
+            const isCurrentMonth = (y === currentYear && (m - 1) === currentMonth);
+
+            const dayPunches = punchesByDay.get(dayDateStr) || [];
             dayPunches.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             
-            // Encontra se tem abono no dia
-            const dayAbono = allAbonos.find(a => new Date(a.timestamp).toLocaleDateString('pt-BR') === dayDateStr);
+            const dayAbono = abonosByDay.get(dayDateStr);
             const standardJourney = state.currentUser.journey;
             
             const result = calculateDayWorkedAndExpected(dayPunches, dayAbono, standardJourney);
 
-            totalWorked += result.workedMinutes;
-            totalExpected += result.expectedJourney;
             totalBalance += result.balance;
+
+            if (isCurrentMonth) {
+                monthWorked += result.workedMinutes;
+                monthExpected += result.expectedJourney;
+            }
         });
 
         // Atualiza os elementos na UI
@@ -793,7 +810,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             domHomeMonthProgress.className = 'progress-bar-fill negative';
             // Calcula o percentual cumprido da jornada de forma simples
-            const pct = totalExpected > 0 ? Math.min(100, Math.round((totalWorked / totalExpected) * 100)) : 50;
+            const pct = monthExpected > 0 ? Math.min(100, Math.round((monthWorked / monthExpected) * 100)) : 50;
             domHomeMonthProgress.style.width = `${pct}%`;
         } else {
             domHomeMonthBalance.className = 'metric-value';
@@ -2051,6 +2068,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         domCropImage.style.transform = `translate(${cropState.x}px, ${cropState.y}px) scale(${cropState.scale})`;
     });
 
+    function rotateBase64(base64Str, degrees) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.src = base64Str;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                if (Math.abs(degrees) === 90 || Math.abs(degrees) === 270) {
+                    canvas.width = img.height;
+                    canvas.height = img.width;
+                } else {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                }
+                
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.rotate((degrees * Math.PI) / 180);
+                ctx.drawImage(img, -img.width / 2, -img.height / 2);
+                
+                resolve(canvas.toDataURL('image/jpeg', 0.8));
+            };
+            img.onerror = (e) => reject(e);
+        });
+    }
+
+    if (domBtnRotateLeft) {
+        domBtnRotateLeft.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!cropState.originalSrc) return;
+            showToast("Rotacionando...");
+            try {
+                const rotated = await rotateBase64(cropState.originalSrc, -90);
+                cropState.originalSrc = rotated;
+                domCropImage.src = rotated;
+                cropState.scale = 1;
+                cropState.x = 0;
+                cropState.y = 0;
+                domCropZoomSlider.value = 1;
+                domCropImage.style.transform = `translate(0px, 0px) scale(1)`;
+            } catch (err) {
+                console.error("Erro ao rotacionar imagem:", err);
+                showToast("Erro ao rotacionar imagem.");
+            }
+        });
+    }
+
+    if (domBtnRotateRight) {
+        domBtnRotateRight.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!cropState.originalSrc) return;
+            showToast("Rotacionando...");
+            try {
+                const rotated = await rotateBase64(cropState.originalSrc, 90);
+                cropState.originalSrc = rotated;
+                domCropImage.src = rotated;
+                cropState.scale = 1;
+                cropState.x = 0;
+                cropState.y = 0;
+                domCropZoomSlider.value = 1;
+                domCropImage.style.transform = `translate(0px, 0px) scale(1)`;
+            } catch (err) {
+                console.error("Erro ao rotacionar imagem:", err);
+                showToast("Erro ao rotacionar imagem.");
+            }
+        });
+    }
+
     // Controles de Largura e Altura Dinâmicos
     domCropWidthSlider.addEventListener('input', (e) => {
         const w = parseInt(e.target.value);
@@ -2587,6 +2672,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    function updateRecurrenceOptionText() {
+        const dateVal = domAbonoDate.value;
+        if (!dateVal) return;
+        const [y, m, d] = dateVal.split('-').map(Number);
+        const dateObj = new Date(y, m - 1, d, 12, 0, 0);
+        const weekdayStr = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+        const capitalizedWeekday = weekdayStr.charAt(0).toUpperCase() + weekdayStr.slice(1);
+        
+        const weeklyOption = domAbonoRecurrence.querySelector('option[value="weekly"]');
+        if (weeklyOption) {
+            weeklyOption.textContent = `Semanalmente (toda ${capitalizedWeekday})`;
+        }
+    }
+
+    function getRecurrenceDates(startDateStr, endDateStr, type) {
+        const dates = [];
+        const start = new Date(startDateStr + 'T12:00:00');
+        const end = new Date(endDateStr + 'T12:00:00');
+        
+        let current = new Date(start);
+        const startDayOfWeek = start.getDay();
+        
+        while (current <= end) {
+            let match = false;
+            if (type === 'weekly') {
+                match = current.getDay() === startDayOfWeek;
+            } else if (type === 'weekdays') {
+                const day = current.getDay();
+                match = day >= 1 && day <= 5;
+            } else if (type === 'daily') {
+                match = true;
+            }
+            
+            if (match) {
+                dates.push(new Date(current));
+            }
+            current.setDate(current.getDate() + 1);
+        }
+        return dates;
+    }
+
+    domAbonoDate.addEventListener('change', updateRecurrenceOptionText);
+    
+    domAbonoRecurrence.addEventListener('change', () => {
+        if (domAbonoRecurrence.value !== 'none') {
+            domAbonoRecurrenceEndGroup.classList.remove('hidden');
+        } else {
+            domAbonoRecurrenceEndGroup.classList.add('hidden');
+        }
+    });
+
     // Salvar Abono
     domAbonoForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -2595,40 +2731,82 @@ document.addEventListener('DOMContentLoaded', async () => {
         const type = domAbonoType.value;
         const startTime = domAbonoStartTime.value;
         const endTime = domAbonoEndTime.value;
+        const recurrence = domAbonoRecurrence.value;
+        const recurrenceEnd = domAbonoRecurrenceEnd.value;
 
         if (!dateStr || !reason) {
             showToast("Preencha a data e o motivo.");
             return;
         }
 
-        // Criar objeto Date no meio do dia para evitar problemas de fuso
-        const [year, month, day] = dateStr.split('-').map(Number);
-        const dateObj = new Date(year, month - 1, day, 12, 0, 0);
+        // Se for gravação com recorrência (apenas para novos registros)
+        if (!domAbonoId.value && recurrence !== 'none') {
+            if (!recurrenceEnd) {
+                showToast("Preencha a data limite para a repetição.");
+                return;
+            }
+            
+            const dates = getRecurrenceDates(dateStr, recurrenceEnd, recurrence);
+            if (dates.length === 0) {
+                showToast("Nenhuma data encontrada no período selecionado.");
+                return;
+            }
 
-        const id = domAbonoId.value || 'abono_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+            try {
+                for (const d of dates) {
+                    const id = 'abono_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+                    const cleanAbono = {
+                        id: id,
+                        username: state.currentUser.username,
+                        timestamp: d.toISOString(),
+                        isAbono: true,
+                        abonoType: type,
+                        abonoStart: type === 'period' ? startTime : null,
+                        abonoEnd: type === 'period' ? endTime : null,
+                        reason: reason,
+                        photo: state.currentAbonoPhoto,
+                        synced: false,
+                        deleted: false
+                    };
+                    await window.dbService.savePunch(cleanAbono);
+                }
+                showToast(`${dates.length} abonos gravados com sucesso!`);
+                closeAbonoModal();
+                renderAbonos();
+                window.syncService.triggerAutoSync();
+            } catch (err) {
+                showToast("Erro ao gravar abonos recorrentes: " + err);
+            }
+        } else {
+            // Criar objeto Date no meio do dia para evitar problemas de fuso
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const dateObj = new Date(year, month - 1, day, 12, 0, 0);
 
-        const cleanAbono = {
-            id: id,
-            username: state.currentUser.username,
-            timestamp: dateObj.toISOString(),
-            isAbono: true,
-            abonoType: type,
-            abonoStart: type === 'period' ? startTime : null,
-            abonoEnd: type === 'period' ? endTime : null,
-            reason: reason,
-            photo: state.currentAbonoPhoto,
-            synced: false,
-            deleted: false
-        };
+            const id = domAbonoId.value || 'abono_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-        try {
-            await window.dbService.savePunch(cleanAbono);
-            showToast(domAbonoId.value ? "Abono atualizado com sucesso!" : "Abono gravado com sucesso!");
-            closeAbonoModal();
-            renderAbonos();
-            window.syncService.triggerAutoSync();
-        } catch (err) {
-            showToast("Erro ao gravar abono: " + err);
+            const cleanAbono = {
+                id: id,
+                username: state.currentUser.username,
+                timestamp: dateObj.toISOString(),
+                isAbono: true,
+                abonoType: type,
+                abonoStart: type === 'period' ? startTime : null,
+                abonoEnd: type === 'period' ? endTime : null,
+                reason: reason,
+                photo: state.currentAbonoPhoto,
+                synced: false,
+                deleted: false
+            };
+
+            try {
+                await window.dbService.savePunch(cleanAbono);
+                showToast(domAbonoId.value ? "Abono atualizado com sucesso!" : "Abono gravado com sucesso!");
+                closeAbonoModal();
+                renderAbonos();
+                window.syncService.triggerAutoSync();
+            } catch (err) {
+                showToast("Erro ao gravar abono: " + err);
+            }
         }
     });
 
@@ -2647,6 +2825,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             domAbonoType.value = 'day';
             domAbonoPeriodFields.classList.add('hidden');
+            
+            // Configurações de recorrência
+            domAbonoRecurrenceGroup.classList.remove('hidden');
+            domAbonoRecurrence.value = 'none';
+            domAbonoRecurrenceEndGroup.classList.add('hidden');
+            // Data limite padrão: último dia do mês atual
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            const lastY = lastDay.getFullYear();
+            const lastM = String(lastDay.getMonth() + 1).padStart(2, '0');
+            const lastD = String(lastDay.getDate()).padStart(2, '0');
+            domAbonoRecurrenceEnd.value = `${lastY}-${lastM}-${lastD}`;
+            updateRecurrenceOptionText();
+            
             clearAbonoPhotoSelection();
         } else {
             domAbonoModalTitle.textContent = "Editar Abono";
@@ -2667,6 +2858,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 domAbonoPeriodFields.classList.add('hidden');
             }
+            
+            // Esconde recorrência na edição
+            domAbonoRecurrenceGroup.classList.add('hidden');
+            domAbonoRecurrenceEndGroup.classList.add('hidden');
             
             if (abono.photo) {
                 state.currentAbonoPhoto = abono.photo;

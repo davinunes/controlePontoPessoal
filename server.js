@@ -32,6 +32,30 @@ app.use(express.json({ limit: '50mb' })); // Aumenta limite de JSON para permiti
 app.use(express.static(path.join(__dirname, 'public'))); // Serve o frontend estático
 
 // Helpers de Leitura e Escrita
+function calculateMonthHash(punches) {
+    if (!Array.isArray(punches)) return '';
+    const activePunches = punches.filter(p => p && !p.deleted);
+    const sorted = [...activePunches].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    const representation = sorted.map(p => ({
+        id: p.id,
+        timestamp: p.timestamp,
+        isAbono: !!p.isAbono,
+        abonoType: p.abonoType || null,
+        abonoStart: p.abonoStart || null,
+        abonoEnd: p.abonoEnd || null,
+        reason: p.reason || null,
+        photoHash: p.photo ? p.photo.length + '_' + p.photo.substring(Math.max(0, p.photo.length - 20)) : 'none',
+        deleted: !!p.deleted,
+        updatedAt: p.updatedAt || ''
+    }));
+    const str = JSON.stringify(representation);
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash * 33) ^ str.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(16);
+}
+
 function readUsers() {
     try {
         const data = fs.readFileSync(USERS_FILE, 'utf8');
@@ -209,10 +233,10 @@ app.post('/api/login', (req, res) => {
 
 /**
  * POST /api/sync
- * Sincroniza em lote os pontos gerados offline com o servidor e retorna o estado atual consolidado.
+ * Sincroniza em lote os pontos gerados offline com o servidor e retorna apenas os dados dos meses que sofreram alterações.
  */
 app.post('/api/sync', (req, res) => {
-    const { username, punches: clientPunches } = req.body;
+    const { username, punches: clientPunches, hashes: clientHashes = {} } = req.body;
 
     if (!username || !Array.isArray(clientPunches)) {
         return res.status(400).json({ success: false, message: 'Dados inválidos para sincronização.' });
@@ -263,19 +287,53 @@ app.post('/api/sync', (req, res) => {
         }
     });
 
-    // Filtra pontos de exclusão lógica física se necessário, mas mantemos o histórico para retrocompatibilidade
-    // Vamos converter o mapa de volta para array
     const mergedPunches = Array.from(serverMap.values());
     
     // Salva o novo array consolidado
     writeUserPunches(cleanUsername, mergedPunches);
 
-    console.log(`[API] Sincronização concluída para @${cleanUsername}. Recebidos: ${clientPunches.length}, Servidor agora tem: ${mergedPunches.length}`);
+    // Agrupar pontos por YYYY_MM e calcular hashes de cada mês no servidor
+    const grouped = {};
+    mergedPunches.forEach(punch => {
+        if (!punch) return;
+        const date = new Date(punch.timestamp);
+        let year = date.getFullYear();
+        let month = String(date.getMonth() + 1).padStart(2, '0');
+        if (isNaN(year)) {
+            const now = new Date();
+            year = now.getFullYear();
+            month = String(now.getMonth() + 1).padStart(2, '0');
+        }
+        const key = `${year}_${month}`;
+        if (!grouped[key]) {
+            grouped[key] = [];
+        }
+        grouped[key].push(punch);
+    });
+
+    const serverHashes = {};
+    for (const [key, list] of Object.entries(grouped)) {
+        serverHashes[key] = calculateMonthHash(list);
+    }
+
+    // Filtrar batidas de retorno: enviar apenas dos meses onde as hashes divergem
+    const responsePunches = [];
+    for (const [key, list] of Object.entries(grouped)) {
+        const clientHash = clientHashes[key];
+        const serverHash = serverHashes[key];
+        
+        if (clientHash !== serverHash) {
+            // Se a hash divergiu, adicionamos todas as batidas desse mês (incluindo deletadas)
+            responsePunches.push(...list);
+        }
+    }
+
+    console.log(`[API] Sincronização otimizada concluída para @${cleanUsername}. Recebidos: ${clientPunches.length}, Enviados: ${responsePunches.length}, Total Servidor: ${mergedPunches.length}`);
     
-    // Retorna todos os pontos consolidados para o cliente (incluindo deletados para que o cliente limpe o DB local)
     res.json({
         success: true,
-        punches: mergedPunches
+        punches: responsePunches,
+        hashes: serverHashes
     });
 });
 
