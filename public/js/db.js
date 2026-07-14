@@ -346,7 +346,7 @@ class AppDB {
      * Mescla os dados recebidos do servidor.
      * serverPunches é uma lista de pontos retornada pelo servidor (estado global definitivo).
      */
-    mergePunchesFromServer(username, serverPunches) {
+    mergePunchesFromServer(username, serverPunches, targetMonths = null) {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['punches'], 'readwrite');
             const store = transaction.objectStore('punches');
@@ -393,6 +393,21 @@ class AppDB {
                 // Removemos localmente também.
                 localMap.forEach((localPunch, id) => {
                     if (localPunch.synced) {
+                        // Se targetMonths foi informado, só apagamos se o ponto pertencer a um dos meses sincronizados
+                        if (targetMonths) {
+                            const date = new Date(localPunch.timestamp);
+                            let year = date.getFullYear();
+                            let month = String(date.getMonth() + 1).padStart(2, '0');
+                            if (isNaN(year)) {
+                                const now = new Date();
+                                year = now.getFullYear();
+                                month = String(now.getMonth() + 1).padStart(2, '0');
+                            }
+                            const punchMonthKey = `${year}_${month}`;
+                            if (!targetMonths.includes(punchMonthKey)) {
+                                return; // Mantém o ponto local de outros meses intocado
+                            }
+                        }
                         operations.push(store.delete(id));
                     }
                 });

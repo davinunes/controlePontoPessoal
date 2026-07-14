@@ -175,8 +175,17 @@ class SyncService {
             const data = await response.json();
 
             if (data.success && Array.isArray(data.punches)) {
+                // Calcula quais meses divergiram entre o cliente e o servidor ( targetMonths )
+                const targetMonths = [];
+                const allKeys = new Set([...Object.keys(localHashes), ...Object.keys(data.hashes || {})]);
+                for (const key of allKeys) {
+                    if (localHashes[key] !== (data.hashes && data.hashes[key])) {
+                        targetMonths.push(key);
+                    }
+                }
+
                 // 4. Integra os dados retornados pelo servidor no IndexedDB local
-                await window.dbService.mergePunchesFromServer(username, data.punches);
+                await window.dbService.mergePunchesFromServer(username, data.punches, targetMonths);
                 
                 // 5. Marca os itens originais enviados como sincronizados
                 // (O merge já faz isso, mas garantimos para os IDs enviados)
