@@ -152,6 +152,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const domAbonosListContainer = document.getElementById('abonos-list-container');
     const domBtnAddAbonoTrigger = document.getElementById('btn-add-abono-trigger');
     const domBtnExportPdf = document.getElementById('btn-export-pdf');
+    const domBtnDownloadJson = document.getElementById('btn-download-json');
+    const domBtnAuditJson = document.getElementById('btn-audit-json');
 
     // Referências - Modal de Abono
     const domAbonoModal = document.getElementById('abono-modal');
@@ -3025,6 +3027,209 @@ document.addEventListener('DOMContentLoaded', async () => {
             showToast("Erro ao carregar abonos.");
         }
     }
+
+    // =========================================================================
+    // AÇÕES DE EXPORTAÇÃO DE DADOS DA FOLHA: DOWNLOAD JSON e AUDIT
+    // =========================================================================
+
+    /**
+     * Dispara o download de um Blob no navegador.
+     */
+    function triggerDownload(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+
+    /**
+     * Comprime um Uint8Array usando CompressionStream (API nativa moderna).
+     * Retorna uma Promise<Uint8Array>. Lança erro se não suportado.
+     */
+    async function compressWithGzip(uint8Array) {
+        const cs = new CompressionStream('gzip');
+        const writer = cs.writable.getWriter();
+        writer.write(uint8Array);
+        writer.close();
+        const chunks = [];
+        const reader = cs.readable.getReader();
+        let done, value;
+        while ({ done, value } = await reader.read(), !done) {
+            chunks.push(value);
+        }
+        const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return result;
+    }
+
+    // ── Botão: Download JSON do mês (dados brutos, sem foto se comprimido) ──
+    domBtnDownloadJson.addEventListener('click', async () => {
+        if (!state.currentUser) return;
+
+        const username = state.currentUser.username;
+        const year = state.selectedMonth.getFullYear();
+        const month = state.selectedMonth.getMonth();
+
+        showToast('Preparando download...');
+
+        try {
+            const allPunchesRaw = await window.dbService.getPunches(username);
+
+            // Filtra registros do mês selecionado (inclui abonos, exclui deletados)
+            const monthData = allPunchesRaw.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && !p.deleted;
+            });
+
+            const monthLabel = `${String(month + 1).padStart(2, '0')}_${year}`;
+            const jsonStr = JSON.stringify(monthData, null, 2);
+            const bytes = new TextEncoder().encode(jsonStr);
+
+            const supportsCompression = typeof CompressionStream !== 'undefined';
+
+            if (supportsCompression) {
+                const compressed = await compressWithGzip(bytes);
+                const blob = new Blob([compressed], { type: 'application/gzip' });
+                triggerDownload(blob, `ponto_${username}_${monthLabel}.json.gz`);
+                showToast(`Download pronto! (${Math.round(compressed.length / 1024)}KB gzip)`);
+            } else {
+                const blob = new Blob([bytes], { type: 'application/json' });
+                triggerDownload(blob, `ponto_${username}_${monthLabel}.json`);
+                showToast('Download pronto!');
+            }
+        } catch (err) {
+            console.error('Erro ao gerar download JSON:', err);
+            showToast('Falha ao gerar o download.');
+        }
+    });
+
+    // ── Botão: Audit JSON (resumo sem base64) ──
+    domBtnAuditJson.addEventListener('click', async () => {
+        if (!state.currentUser) return;
+
+        const username = state.currentUser.username;
+        const year = state.selectedMonth.getFullYear();
+        const month = state.selectedMonth.getMonth();
+
+        showToast('Gerando auditoria...');
+
+        try {
+            const allPunchesRaw = await window.dbService.getPunches(username);
+
+            // Separa batidas normais e abonos do mês
+            const monthPunches = allPunchesRaw.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && !p.isAbono && !p.deleted;
+            });
+            const monthAbonos = allPunchesRaw.filter(p => {
+                const d = new Date(p.timestamp);
+                return d.getFullYear() === year && d.getMonth() === month && p.isAbono && !p.deleted;
+            });
+
+            // Agrupa batidas por dia
+            const punchesByDay = {};
+            monthPunches.forEach(p => {
+                const dayNum = new Date(p.timestamp).getDate();
+                if (!punchesByDay[dayNum]) punchesByDay[dayNum] = [];
+                punchesByDay[dayNum].push(p);
+            });
+
+            // Agrupa abonos por dia (máx. um por dia)
+            const abonosByDay = {};
+            monthAbonos.forEach(a => {
+                const dayNum = new Date(a.timestamp).getDate();
+                abonosByDay[dayNum] = a;
+            });
+
+            // Determina os dias com atividade
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const allActiveDays = new Set([
+                ...Object.keys(punchesByDay).map(Number),
+                ...Object.keys(abonosByDay).map(Number)
+            ]);
+
+            const standardJourney = state.currentUser.journey;
+
+            // Monta array de dias
+            const diasAudit = [...allActiveDays].sort((a, b) => a - b).map(day => {
+                const dayPunches = (punchesByDay[day] || []).sort(
+                    (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+                );
+                const dayAbono = abonosByDay[day] || null;
+
+                // Horários formatados (ex: "07:37, 11:44, 12:56, 14:37")
+                const batidas = dayPunches.map(p =>
+                    new Date(p.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                ).join(', ');
+
+                const result = calculateDayWorkedAndExpected(dayPunches, dayAbono, standardJourney);
+                const balanceMin = result.balance;
+
+                // Formata saldo: "02:12" ou "-00:30"
+                const absBalance = Math.abs(balanceMin);
+                const bh = String(Math.floor(absBalance / 60)).padStart(2, '0');
+                const bm = String(absBalance % 60).padStart(2, '0');
+                const saldoStr = (balanceMin < 0 ? '-' : '') + `${bh}:${bm}`;
+
+                const indicadorBanco = balanceMin >= 0 ? 'Credito' : 'Debito';
+
+                // Monta data no formato ISO (AAAA-MM-DD)
+                const dateIso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+                return {
+                    data: dateIso,
+                    batidas: batidas || '',
+                    saldo_dia: saldoStr,
+                    indicador_banco: indicadorBanco
+                };
+            });
+
+            // Monta array de abonos
+            const abonosAudit = monthAbonos
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+                .map(a => {
+                    const d = new Date(a.timestamp);
+                    const dateIso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    const entry = {
+                        data: dateIso,
+                        motivo: a.reason || ''
+                    };
+                    if (a.abonoType === 'period') {
+                        entry.horario_inicio = a.abonoStart || '';
+                        entry.horario_fim = a.abonoEnd || '';
+                    } else {
+                        entry.horario_inicio = '00:00';
+                        entry.horario_fim = '23:59';
+                    }
+                    return entry;
+                });
+
+            const mesRef = `${String(month + 1).padStart(2, '0')}/${year}`;
+            const auditPayload = {
+                mes_referencia: mesRef,
+                dias: diasAudit,
+                abonos: abonosAudit
+            };
+
+            const jsonStr = JSON.stringify(auditPayload, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const monthLabel = `${String(month + 1).padStart(2, '0')}_${year}`;
+            triggerDownload(blob, `audit_${username}_${monthLabel}.json`);
+            showToast('Auditoria exportada com sucesso!');
+        } catch (err) {
+            console.error('Erro ao gerar auditoria JSON:', err);
+            showToast('Falha ao gerar auditoria.');
+        }
+    });
 
     // Ação de Exportar PDF de Comprovantes (Colmeia)
     domBtnExportPdf.addEventListener('click', async () => {
